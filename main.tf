@@ -51,3 +51,16 @@ module "gateway" {
   public_subnet_cidrs  = var.public_subnet_cidrs
   private_subnet_cidrs = var.private_subnet_cidrs
 }
+
+# Account-level audit logging + threat detection. Defaults ON so the account
+# retains CloudTrail + GuardDuty after it leaves the CodeVine AWS Organization
+# (org-level coverage stops on removal). See modules/audit and README.
+module "audit" {
+  source = "./modules/audit"
+
+  customer = var.customer
+
+  enable_cloudtrail         = var.enable_cloudtrail
+  enable_guardduty          = var.enable_guardduty
+  cloudtrail_retention_days = var.cloudtrail_retention_days
+}

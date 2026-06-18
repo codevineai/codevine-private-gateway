@@ -43,3 +43,13 @@ output "observability_role_arn" {
   description = "Cross-account observability role ARN"
   value       = module.gateway.observability_role_arn
 }
+
+output "cloudtrail_bucket" {
+  description = "S3 bucket holding this account's CloudTrail logs (null if disabled)"
+  value       = module.audit.cloudtrail_bucket
+}
+
+output "guardduty_detector_id" {
+  description = "GuardDuty detector ID for this account (null if disabled)"
+  value       = module.audit.guardduty_detector_id
+}

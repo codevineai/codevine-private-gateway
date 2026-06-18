@@ -146,3 +146,27 @@ variable "infra_version" {
   type        = string
   default     = "v1"
 }
+
+# Audit — account-level CloudTrail + GuardDuty
+#
+# Defaults ON so the account keeps audit logging + threat detection after it
+# leaves the CodeVine AWS Organization (the org trail and org-managed GuardDuty
+# stop covering it on removal). Set false if you centralize these elsewhere.
+
+variable "enable_cloudtrail" {
+  description = "Create an account-level multi-region CloudTrail trail + S3 bucket"
+  type        = bool
+  default     = true
+}
+
+variable "enable_guardduty" {
+  description = "Create a standalone GuardDuty detector. See README re: importing an existing detector after org removal."
+  type        = bool
+  default     = true
+}
+
+variable "cloudtrail_retention_days" {
+  description = "Days to retain CloudTrail logs in S3 before expiry"
+  type        = number
+  default     = 365
+}

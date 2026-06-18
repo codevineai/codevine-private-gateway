@@ -13,6 +13,8 @@ gateway stores it in DynamoDB and S3 that you own.
 - DynamoDB table + S3 payload bucket (your chat data)
 - SQS queues (inbound/outbound) for the observability channel
 - IAM roles CodeVine assumes for deploys, image push, and observability
+- Account-level CloudTrail (+ log bucket) and a GuardDuty detector
+  (defaults on — see [Audit logging & threat detection](#audit-logging--threat-detection))
 
 The only outbound dependencies on CodeVine are: the control-plane URL (the
 gateway heartbeats/registers there), the control-plane account ID (trust
@@ -112,6 +114,53 @@ CodeVine pushes new gateway images and rolls deployments via the cross-account
 roles. You generally won't need to re-run Terraform except to change sizing
 (`desired_count`, `gateway_cpu`, …) or networking.
 
+## Audit logging & threat detection
+
+This Terraform provisions, **on by default**, an account-level audit baseline so
+the account is self-sufficient once it is independent of any AWS Organization:
+
+- **CloudTrail** — a multi-region trail with log-file validation, writing to a
+  dedicated, encrypted, private S3 bucket in your account
+  (`{customer}-...-cloudtrail-{account_id}`, logs expire after
+  `cloudtrail_retention_days`, default 365).
+- **GuardDuty** — a standalone detector for the account.
+
+Disable either if you centralize it elsewhere (e.g. via your own AWS
+Organization):
+
+```hcl
+enable_cloudtrail = false
+enable_guardduty  = false
+```
+
+Outputs `cloudtrail_bucket` and `guardduty_detector_id` report what was created.
+
+### GuardDuty: importing a pre-existing detector
+
+AWS allows only **one** GuardDuty detector per account per region. If the
+account already has a detector — common when it was previously a member of a
+parent organization's GuardDuty — a plain `terraform apply` with
+`enable_guardduty = true` will **fail with a conflict**.
+
+Two ways to handle it:
+
+1. **Import the existing detector** (keeps its history):
+
+   ```bash
+   # find the detector id
+   aws guardduty list-detectors --region us-east-1
+   terraform import 'module.audit.aws_guardduty_detector.main[0]' <detector-id>
+   terraform apply
+   ```
+
+2. **Defer until the detector is yours alone.** Apply with
+   `enable_guardduty = false` first; once the account has left any parent
+   organization (so no conflicting detector remains), set it back to `true` and
+   either import (option 1) or let Terraform create a fresh one.
+
+CloudTrail has no such constraint — the account does not start with its own
+trail, so it is always created cleanly.
+
 ## Teardown
 
 ALB deletion protection is on by default. To destroy:
@@ -123,3 +172,10 @@ terraform destroy
 
 Notify CodeVine before teardown so they can remove the DNS records on their
 side.
+
+> The CloudTrail log bucket is created with `force_destroy = false` so audit
+> logs are not deleted by accident. If you intend to discard the logs too, empty
+> the bucket (or temporarily set `force_destroy = true` on it) before
+> `terraform destroy`. If you imported a pre-existing GuardDuty detector,
+> `terraform destroy` will disable it — `terraform state rm` it first if you want
+> the detector to survive teardown.
