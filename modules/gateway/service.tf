@@ -1,0 +1,477 @@
+# Gateway Workload — ECS service, task, SQS, DynamoDB, S3 payload bucket,
+# autoscaling, and the ALB target group / listener rule.
+#
+# Single-region dedicated pod: always "primary", so the account-level
+# resources (S3 bucket, credentials secret, DynamoDB table) are created
+# unconditionally here rather than gated on an is_primary flag.
+
+locals {
+  pod_s3_bucket_name = aws_s3_bucket.payload.id
+  pod_s3_bucket_arn  = aws_s3_bucket.payload.arn
+  pod_secret_arn     = aws_secretsmanager_secret.pod.arn
+  pod_dynamodb_name  = aws_dynamodb_table.data.name
+  pod_service_name   = "${local.pod_prefix}-service"
+}
+
+# ──────────────────────────────────────────────────────────
+# Pod identity + HMAC secret
+#
+# By default these are generated. For an in-place rebuild of an existing pod
+# (e.g. migrating a pod to a new account/state without re-registering with the
+# control plane), pass var.pod_id + var.hmac_secret to reuse the existing
+# identity — the control plane keys the pod row on pod_id and treats the HMAC
+# as immutable, so reusing both preserves the existing registration.
+# ──────────────────────────────────────────────────────────
+
+resource "random_id" "pod_id" {
+  count       = var.pod_id == "" ? 1 : 0
+  byte_length = 8
+}
+
+resource "random_password" "hmac_secret" {
+  count            = var.hmac_secret == "" ? 1 : 0
+  length           = 32
+  special          = true
+  override_special = "!$*()_+-[]{}:;.,~"
+}
+
+locals {
+  pod_id_value      = var.pod_id != "" ? var.pod_id : random_id.pod_id[0].hex
+  hmac_secret_value = var.hmac_secret != "" ? var.hmac_secret : random_password.hmac_secret[0].result
+}
+
+# ──────────────────────────────────────────────────────────
+# S3 Payload Bucket
+# ──────────────────────────────────────────────────────────
+
+resource "aws_s3_bucket" "payload" {
+  bucket = "${var.project_name}-${var.environment}-gateway-dedicated-${var.customer}-${local.account_id}"
+
+  tags = { Name = "${local.pod_prefix}-payload" }
+}
+
+resource "aws_s3_bucket_versioning" "payload" {
+  bucket = aws_s3_bucket.payload.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "payload" {
+  bucket = aws_s3_bucket.payload.id
+
+  rule {
+    id     = "transition-to-ia"
+    status = "Enabled"
+
+    filter {}
+
+    transition {
+      days          = 90
+      storage_class = "STANDARD_IA"
+    }
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "payload" {
+  bucket = aws_s3_bucket.payload.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "payload" {
+  bucket = aws_s3_bucket.payload.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# ──────────────────────────────────────────────────────────
+# Pod Credentials Secret
+# ──────────────────────────────────────────────────────────
+
+resource "aws_secretsmanager_secret" "pod" {
+  name        = "${var.project_name}/${var.environment}/gateway/dedicated-${var.customer}/credentials"
+  description = "Gateway pod credentials for dedicated-${var.customer}"
+}
+
+resource "aws_secretsmanager_secret_version" "pod" {
+  secret_id = aws_secretsmanager_secret.pod.id
+
+  secret_string = jsonencode({
+    GATEWAY_POD_ID      = local.pod_id_value
+    GATEWAY_HMAC_SECRET = local.hmac_secret_value
+  })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ──────────────────────────────────────────────────────────
+# DynamoDB Data Table (shared by all tenants on this pod)
+# ──────────────────────────────────────────────────────────
+
+resource "aws_dynamodb_table" "data" {
+  name                        = "${local.pod_prefix}-data"
+  billing_mode                = "PAY_PER_REQUEST"
+  deletion_protection_enabled = true
+  hash_key                    = "PK"
+  range_key                   = "SK"
+
+  attribute {
+    name = "PK"
+    type = "S"
+  }
+
+  attribute {
+    name = "SK"
+    type = "S"
+  }
+
+  attribute {
+    name = "GSI2_PK"
+    type = "S"
+  }
+
+  attribute {
+    name = "GSI2_SK"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "GSI2"
+    hash_key        = "GSI2_PK"
+    range_key       = "GSI2_SK"
+    projection_type = "ALL"
+  }
+
+  ttl {
+    attribute_name = "ExpiresAt"
+    enabled        = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  tags = { Name = "${local.pod_prefix}-data" }
+}
+
+# ──────────────────────────────────────────────────────────
+# SQS Queues
+# ──────────────────────────────────────────────────────────
+
+resource "aws_sqs_queue" "outbound_dlq" {
+  name                      = "${local.pod_prefix}-outbound-dlq"
+  message_retention_seconds = 1209600 # 14 days
+  sqs_managed_sse_enabled   = true
+
+  tags = { Name = "${local.pod_prefix}-outbound-dlq" }
+}
+
+resource "aws_sqs_queue" "outbound" {
+  name                       = "${local.pod_prefix}-outbound"
+  visibility_timeout_seconds = 600
+  message_retention_seconds  = 345600 # 4 days
+  sqs_managed_sse_enabled    = true
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.outbound_dlq.arn
+    maxReceiveCount     = 5
+  })
+
+  tags = { Name = "${local.pod_prefix}-outbound" }
+}
+
+resource "aws_sqs_queue" "inbound_dlq" {
+  name                      = "${local.pod_prefix}-inbound-dlq"
+  message_retention_seconds = 1209600 # 14 days
+  sqs_managed_sse_enabled   = true
+
+  tags = { Name = "${local.pod_prefix}-inbound-dlq" }
+}
+
+resource "aws_sqs_queue" "inbound" {
+  name                       = "${local.pod_prefix}-inbound"
+  visibility_timeout_seconds = 600
+  message_retention_seconds  = 345600 # 4 days
+  sqs_managed_sse_enabled    = true
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.inbound_dlq.arn
+    maxReceiveCount     = 5
+  })
+
+  tags = { Name = "${local.pod_prefix}-inbound" }
+}
+
+# ──────────────────────────────────────────────────────────
+# CloudWatch Log Group
+# ──────────────────────────────────────────────────────────
+
+resource "aws_cloudwatch_log_group" "gateway" {
+  name              = "/ecs/${var.project_name}/${var.environment}/gateway/dedicated-${var.customer}"
+  retention_in_days = 90
+
+  tags = { Name = "${local.pod_prefix}-logs" }
+}
+
+# ──────────────────────────────────────────────────────────
+# Security Group for Gateway Tasks
+# ──────────────────────────────────────────────────────────
+
+resource "aws_security_group" "gateway" {
+  name        = "${local.pod_prefix}-tasks-sg"
+  description = "Security group for gateway pod tasks"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description     = "Allow traffic from ALB"
+    from_port       = 8080
+    to_port         = 8080
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  egress {
+    description = "Allow all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "${local.pod_prefix}-tasks-sg" }
+}
+
+# ──────────────────────────────────────────────────────────
+# ALB Target Group + Listener Rule
+# ──────────────────────────────────────────────────────────
+
+resource "aws_lb_target_group" "gateway" {
+  name        = substr("${local.pod_prefix}-tg", 0, 32)
+  port        = 8080
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    path                = "/health"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    matcher             = "200"
+  }
+
+  deregistration_delay = 30
+
+  tags = { Name = "${local.pod_prefix}-tg" }
+}
+
+# Attach the gateway cert as an additional SNI cert on the HTTPS listener.
+# Uses the validated cert ARN so it waits on the validation gate (see main.tf).
+resource "aws_lb_listener_certificate" "gateway" {
+  listener_arn    = aws_lb_listener.https.arn
+  certificate_arn = aws_acm_certificate_validation.gateway.certificate_arn
+}
+
+# Route the gateway FQDN to the gateway target group
+resource "aws_lb_listener_rule" "gateway" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = var.listener_rule_priority
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.gateway.arn
+  }
+
+  condition {
+    host_header {
+      values = [local.gateway_fqdn]
+    }
+  }
+}
+
+# ──────────────────────────────────────────────────────────
+# ECS Task Definition
+# ──────────────────────────────────────────────────────────
+
+resource "aws_ecs_task_definition" "gateway" {
+  family                   = local.pod_prefix
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.gateway_cpu
+  memory                   = var.gateway_memory
+  execution_role_arn       = aws_iam_role.gateway_task_execution.arn
+  task_role_arn            = aws_iam_role.gateway_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "gateway"
+      image     = "${aws_ecr_repository.gateway.repository_url}:latest"
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = 8080
+          protocol      = "tcp"
+        }
+      ]
+
+      environment = concat([
+        { name = "GATEWAY_PORT", value = "8080" },
+        { name = "LOG_DIR", value = "/var/log/gateway" },
+        { name = "INFRA_VERSION", value = var.infra_version },
+        { name = "INFRA_GIT_HASH", value = local.infra_git_hash },
+        { name = "S3_PAYLOAD_BUCKET", value = local.pod_s3_bucket_name },
+        { name = "SQS_OUTBOUND_QUEUE_URL", value = aws_sqs_queue.outbound.url },
+        { name = "SQS_INBOUND_QUEUE_URL", value = aws_sqs_queue.inbound.url },
+        { name = "AWS_REGION", value = local.aws_region },
+        { name = "AWS_ACCOUNT_ID", value = local.account_id },
+        { name = "DYNAMODB_TABLE_NAME", value = local.pod_dynamodb_name },
+        { name = "OBSERVABILITY_ROLE_ARN", value = aws_iam_role.observability.arn },
+        { name = "ECS_CLUSTER_NAME", value = aws_ecs_cluster.gateway.name },
+        { name = "ECS_SERVICE_NAME", value = local.pod_service_name },
+        { name = "ECR_REPO_URI", value = aws_ecr_repository.gateway.repository_url },
+        { name = "ALB_DNS_NAME", value = aws_lb.gateway.dns_name },
+        { name = "ALB_HOSTED_ZONE_ID", value = aws_lb.gateway.zone_id },
+        { name = "DEPLOYMENT_ROLE_ARN", value = aws_iam_role.deployment.arn },
+        { name = "ECR_PUSH_ROLE_ARN", value = aws_iam_role.ecr_push.arn },
+        { name = "CONTROL_PLANE_URL", value = var.control_plane_url },
+      ])
+
+      secrets = [
+        {
+          name      = "GATEWAY_POD_ID"
+          valueFrom = "${local.pod_secret_arn}:GATEWAY_POD_ID::"
+        },
+        {
+          name      = "GATEWAY_HMAC_SECRET"
+          valueFrom = "${local.pod_secret_arn}:GATEWAY_HMAC_SECRET::"
+        },
+        {
+          name      = "GATEWAY_REGISTRATION_SECRET"
+          valueFrom = "${aws_secretsmanager_secret.registration.arn}:GATEWAY_REGISTRATION_SECRET::"
+        }
+      ]
+
+      healthCheck = {
+        command     = ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1"]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 60
+      }
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.gateway.name
+          "awslogs-region"        = local.aws_region
+          "awslogs-stream-prefix" = "gateway"
+        }
+      }
+    }
+  ])
+
+  tags = { Name = "${local.pod_prefix}-task" }
+}
+
+# ──────────────────────────────────────────────────────────
+# ECS Service
+# ──────────────────────────────────────────────────────────
+
+resource "aws_ecs_service" "gateway" {
+  name            = local.pod_service_name
+  cluster         = aws_ecs_cluster.gateway.id
+  task_definition = aws_ecs_task_definition.gateway.arn
+  desired_count   = var.desired_count
+  launch_type     = "FARGATE"
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+  health_check_grace_period_seconds  = 120
+
+  network_configuration {
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.gateway.id]
+    assign_public_ip = false
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.gateway.arn
+    container_name   = "gateway"
+    container_port   = 8080
+  }
+
+  tags = { Name = "${local.pod_prefix}-service" }
+
+  lifecycle {
+    ignore_changes = [desired_count, task_definition]
+  }
+}
+
+# ──────────────────────────────────────────────────────────
+# Auto Scaling
+# ──────────────────────────────────────────────────────────
+
+resource "aws_appautoscaling_target" "gateway" {
+  max_capacity       = var.max_count
+  min_capacity       = var.min_count
+  resource_id        = "service/${aws_ecs_cluster.gateway.name}/${aws_ecs_service.gateway.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "gateway_cpu" {
+  name               = "${local.pod_prefix}-cpu-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.gateway.resource_id
+  scalable_dimension = aws_appautoscaling_target.gateway.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.gateway.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 70.0
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+  }
+}
+
+resource "aws_appautoscaling_policy" "gateway_requests" {
+  name               = "${local.pod_prefix}-request-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.gateway.resource_id
+  scalable_dimension = aws_appautoscaling_target.gateway.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.gateway.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ALBRequestCountPerTarget"
+      resource_label         = "${aws_lb.gateway.arn_suffix}/${aws_lb_target_group.gateway.arn_suffix}"
+    }
+    target_value       = 1000.0
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+  }
+}

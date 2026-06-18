@@ -1,0 +1,26 @@
+# Copy to terraform.tfvars and fill in the values CodeVine provides.
+# Do NOT commit terraform.tfvars (it is gitignored).
+
+# --- Your account ---
+aws_region  = "us-east-1"
+aws_profile = "my-codevine-gateway-admin" # an AWS CLI profile with admin in your account
+
+# --- Assigned by CodeVine ---
+customer                 = "acme"          # your assigned identifier
+control_plane_account_id = "996904209118"      # CodeVine control plane account
+control_plane_url        = "https://id.codevine.ai"
+
+# registration_secret is sensitive — prefer the environment variable:
+#   export TF_VAR_registration_secret='...'
+# or put it in a gitignored secret.auto.tfvars file.
+
+# --- Optional sizing (defaults shown) ---
+# gateway_cpu    = 512
+# gateway_memory = 1024
+# desired_count  = 2
+# min_count      = 1
+# max_count      = 10
+
+# --- Optional WAF ---
+# enable_waf     = false
+# waf_count_mode = true

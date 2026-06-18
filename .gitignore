@@ -1,0 +1,22 @@
+# Terraform
+.terraform/
+# NOTE: .terraform.lock.hcl (provider dependency lock) is intentionally
+# committed — it pins provider versions + checksums for reproducible,
+# supply-chain-verified installs across every clone. Do NOT ignore it.
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Variable + secret files
+terraform.tfvars
+*.auto.tfvars
+secret.auto.tfvars
+backend.hcl
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Plans
+*.tfplan
