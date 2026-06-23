@@ -142,9 +142,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (default 'v1'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers."
+  description = "CodeVine-controlled infra version stamp (semver, default '1.1'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s."
   type        = string
-  default     = "v1"
+  default     = "1.1"
 }
 
 # Audit — account-level CloudTrail + GuardDuty

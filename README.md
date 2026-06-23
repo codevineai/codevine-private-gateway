@@ -110,9 +110,21 @@ not happen for a fixed `{customer}.gateway.codevine.ai` hostname.)
 
 ## Updating
 
-CodeVine pushes new gateway images and rolls deployments via the cross-account
-roles. You generally won't need to re-run Terraform except to change sizing
-(`desired_count`, `gateway_cpu`, …) or networking.
+There are two kinds of update, handled differently:
+
+- **Application (gateway image) updates** — CodeVine pushes new gateway images
+  and rolls deployments via the cross-account roles. These need **no action from
+  you**; nothing to re-apply.
+- **Infrastructure updates** — changes shipped in new Terraform (ALB settings,
+  timeouts, networking, IAM). The control plane **cannot** apply these for you —
+  they take effect only when you re-run `terraform apply` against the updated
+  module. CodeVine signals an infra update by bumping `infra_version` (surfaced
+  to the running gateway as `INFRA_VERSION`); pull the latest module and
+  `terraform apply` when it changes. See the [Changelog](#changelog) for what
+  each version contains.
+
+Aside from those, you generally won't need to re-run Terraform except to change
+sizing (`desired_count`, `gateway_cpu`, …).
 
 ## Audit logging & threat detection
 
@@ -179,3 +191,23 @@ side.
 > `terraform destroy`. If you imported a pre-existing GuardDuty detector,
 > `terraform destroy` will disable it — `terraform state rm` it first if you want
 > the detector to survive teardown.
+
+## Changelog
+
+Tracks the `infra_version` stamp (semver). A bump means the Terraform changed in
+a way that requires a customer `terraform apply` to take effect — see
+[Updating](#updating). Newest first.
+
+### 1.1
+
+- **ALB `idle_timeout` 300s → 600s.** The gateway aborts a stalled upstream
+  stream after 300s of inactivity; the ALB idle timeout must sit strictly above
+  that so the gateway's own timer fires first, producing a clean error (and
+  partial token capture) instead of an opaque ALB 504. Apply this version to
+  stop long, actively-streaming responses from being cut at the 5-minute mark.
+
+### 1.0
+
+- Initial dedicated gateway: VPC, ECS cluster, ECR, ALB, ACM cert, gateway pod
+  (ECS service, SQS, DynamoDB, S3, IAM, autoscaling), and the account audit
+  baseline (CloudTrail + GuardDuty).

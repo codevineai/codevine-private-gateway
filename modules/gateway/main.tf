@@ -368,7 +368,13 @@ resource "aws_lb" "gateway" {
   enable_deletion_protection       = var.enable_deletion_protection
   enable_http2                     = true
   enable_cross_zone_load_balancing = true
-  idle_timeout                     = 300
+  # 10 minutes. Idle (no-bytes) timeout — resets while a response streams, so it
+  # does not clip healthy streams. Kept strictly ABOVE the gateway binary's 300s
+  # stream-inactivity timeout so the gateway's own timer fires first on a genuine
+  # stall, yielding a clean error + partial-token capture rather than an opaque
+  # ALB 504. Must move in lockstep with the shared ALB (codevine repo
+  # modules/alb) since both front the same gateway binary.
+  idle_timeout = 600
 
   access_logs {
     bucket  = aws_s3_bucket.alb_logs.id
