@@ -11,6 +11,22 @@ locals {
   pod_secret_arn     = aws_secretsmanager_secret.pod.arn
   pod_dynamodb_name  = aws_dynamodb_table.data.name
   pod_service_name   = "${local.pod_prefix}-service"
+
+  # CloudWatch only accepts a fixed set of retention values. For hard control,
+  # logs must NOT outlive the data-retention window, so we pick the largest
+  # allowed value <= source_data_retention_days. When retention is disabled (0)
+  # or the window is shorter than the smallest CW value (1 day), fall back to
+  # the default 90-day operational retention.
+  cw_retention_allowed = [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653]
+  cw_retention_candidates = [
+    for d in local.cw_retention_allowed : d
+    if d <= var.source_data_retention_days
+  ]
+  log_retention_days = (
+    var.source_data_retention_days > 0 && length(local.cw_retention_candidates) > 0
+    ? local.cw_retention_candidates[length(local.cw_retention_candidates) - 1]
+    : 90
+  )
 }
 
 # ──────────────────────────────────────────────────────────
@@ -70,6 +86,30 @@ resource "aws_s3_bucket_lifecycle_configuration" "payload" {
     transition {
       days          = 90
       storage_class = "STANDARD_IA"
+    }
+  }
+
+  # Hard data-retention expunge. Only present when source_data_retention_days > 0
+  # (0 = retain forever; existing customers see no change). Expires the CURRENT
+  # object AND noncurrent versions at the same age — the bucket is versioned
+  # (above), so without the noncurrent rule old versions would survive the
+  # retention window and break the "hard control" promise. Pairs with the
+  # DynamoDB TTL the gateway stamps from the same SOURCE_DATA_RETENTION_DAYS value.
+  dynamic "rule" {
+    for_each = var.source_data_retention_days > 0 ? [1] : []
+    content {
+      id     = "source-data-retention"
+      status = "Enabled"
+
+      filter {}
+
+      expiration {
+        days = var.source_data_retention_days
+      }
+
+      noncurrent_version_expiration {
+        noncurrent_days = var.source_data_retention_days
+      }
     }
   }
 }
@@ -223,7 +263,7 @@ resource "aws_sqs_queue" "inbound" {
 
 resource "aws_cloudwatch_log_group" "gateway" {
   name              = "/ecs/${var.project_name}/${var.environment}/gateway/dedicated-${var.customer}"
-  retention_in_days = 90
+  retention_in_days = local.log_retention_days
 
   tags = { Name = "${local.pod_prefix}-logs" }
 }
@@ -342,6 +382,11 @@ resource "aws_ecs_task_definition" "gateway" {
         { name = "AWS_REGION", value = local.aws_region },
         { name = "AWS_ACCOUNT_ID", value = local.account_id },
         { name = "DYNAMODB_TABLE_NAME", value = local.pod_dynamodb_name },
+        # Hard data-retention. 0 = retain forever; >0 makes the gateway stamp the
+        # DynamoDB ExpiresAt TTL (reaped by the table's ttl{} block below) and
+        # slide the session record forward on each request. Mirrors the S3
+        # lifecycle expiration so both halves of a record expire together.
+        { name = "SOURCE_DATA_RETENTION_DAYS", value = tostring(var.source_data_retention_days) },
         { name = "OBSERVABILITY_ROLE_ARN", value = aws_iam_role.observability.arn },
         { name = "ECS_CLUSTER_NAME", value = aws_ecs_cluster.gateway.name },
         { name = "ECS_SERVICE_NAME", value = local.pod_service_name },

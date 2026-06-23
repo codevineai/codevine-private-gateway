@@ -45,6 +45,7 @@ module "gateway" {
   enable_deletion_protection = var.enable_deletion_protection
   cert_validation_timeout    = var.cert_validation_timeout
   infra_version              = var.infra_version
+  source_data_retention_days = var.source_data_retention_days
 
   vpc_cidr             = var.vpc_cidr
   availability_zones   = var.availability_zones

@@ -160,7 +160,38 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first."
+  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days)."
   type        = string
-  default     = "1.1"
+  default     = "1.2"
+}
+
+variable "source_data_retention_days" {
+  description = <<-EOT
+    Hard retention period (in days) for raw chat SOURCE data — the request/response
+    payloads in S3 and the items in DynamoDB. This is a customer-controlled, AWS-enforced
+    "hard delete" lever, independent of any soft retention applied to derived metadata.
+
+    0 (default) = retain forever; no expiration is configured and existing pods are
+    unaffected. When > 0:
+      - DynamoDB: the gateway stamps an ExpiresAt TTL on each item (REQ#/UPLOAD#/CHUNK#),
+        and slides the SESSION# record's TTL forward on every new request so active
+        sessions never expire mid-life. AWS reaps expired items.
+      - S3: the payload bucket expires both current objects AND noncurrent versions at
+        this age (the bucket is versioned, so both are required for a true hard delete).
+      - CloudWatch logs: gateway log retention is capped to the largest allowed value
+        <= this period, so logs do not outlive the data window.
+
+    CAVEAT — DynamoDB Point-In-Time Recovery (PITR) is enabled on the data table and
+    retains up to 35 days of continuous backups INDEPENDENT of this TTL. For a strict
+    "data is gone after N days everywhere" guarantee with N < 35, also disable PITR on
+    the table (point_in_time_recovery in service.tf). It is left enabled by default as
+    an operational safety net.
+  EOT
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.source_data_retention_days >= 0
+    error_message = "source_data_retention_days must be >= 0 (0 = retain forever)."
+  }
 }

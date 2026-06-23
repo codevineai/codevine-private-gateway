@@ -126,6 +126,46 @@ There are two kinds of update, handled differently:
 Aside from those, you generally won't need to re-run Terraform except to change
 sizing (`desired_count`, `gateway_cpu`, …).
 
+## Data retention
+
+By default the gateway **retains your chat source data forever** — the
+request/response payloads in S3 and the items in DynamoDB are never auto-deleted.
+If your data-governance policy requires a fixed retention window, set
+`source_data_retention_days` to enable **hard, AWS-enforced deletion**:
+
+```hcl
+source_data_retention_days = 90   # 0 = retain forever (default)
+```
+
+When set to a value > 0, a single `terraform apply` makes AWS expire the data
+across every store, with no application involvement:
+
+- **DynamoDB** — the gateway stamps a TTL (`ExpiresAt`) on each record; AWS
+  deletes expired items automatically. An **active session's** record has its TTL
+  **slid forward on every new request**, so a conversation you're still using is
+  never deleted mid-life — the clock starts from its *last* activity, not its
+  first.
+- **S3 payloads** — both current objects and prior (noncurrent) versions expire
+  at the same age. (The bucket is versioned, so expiring only the current version
+  would leave old copies behind — both are removed for a true delete.)
+- **Gateway logs** — CloudWatch log retention is capped so logs never outlive the
+  data window (rounded down to the nearest CloudWatch-supported value).
+
+This lever controls **raw source data only**. Derived analytics metadata that
+CodeVine keeps (counts, costs, titles — never your prompt/response content, per
+the data-bastion model) has its own lifecycle and is unaffected.
+
+> **Caveat — DynamoDB Point-In-Time Recovery (PITR).** The data table has PITR
+> enabled as an operational safety net, which retains up to **35 days** of
+> continuous backups *independently* of the TTL above. If you need a strict
+> guarantee that data is unrecoverable after fewer than 35 days, also disable
+> PITR (`point_in_time_recovery` in `modules/gateway/service.tf`). It is left on
+> by default because most retention policies (≥ 35 days) are unaffected by it.
+
+Lowering or raising the value later is a normal `terraform apply`; AWS applies
+the new lifecycle going forward. Setting it back to `0` stops new expirations
+(items already past their stamped TTL may still be reaped by AWS).
+
 ## Audit logging & threat detection
 
 This Terraform provisions, **on by default**, an account-level audit baseline so
@@ -197,6 +237,16 @@ side.
 Tracks the `infra_version` stamp (semver). A bump means the Terraform changed in
 a way that requires a customer `terraform apply` to take effect — see
 [Updating](#updating). Newest first.
+
+### 1.2
+
+- **Optional hard data retention** via `source_data_retention_days` (default
+  `0` = retain forever, so existing deployments are unchanged). When set, AWS
+  auto-expires raw chat source data: DynamoDB items (with active-session TTLs
+  sliding forward on use), S3 payloads (current **and** noncurrent versions), and
+  gateway log retention capped to match. Apply this version if you need a fixed,
+  AWS-enforced retention window. See [Data retention](#data-retention) — note the
+  DynamoDB PITR (35-day backup) caveat.
 
 ### 1.1
 

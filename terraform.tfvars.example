@@ -24,3 +24,12 @@ control_plane_url        = "https://id.codevine.ai"
 # --- Optional WAF ---
 # enable_waf     = false
 # waf_count_mode = true
+
+# --- Optional hard data retention ---
+# Auto-expire raw chat source data (S3 payloads + DynamoDB items) after N days.
+# 0 (default) = retain forever. When set, AWS enforces deletion: S3 objects and
+# their noncurrent versions expire, DynamoDB items expire via TTL (active sessions
+# slide forward so they don't vanish mid-use), and log retention is capped to match.
+# NOTE: DynamoDB PITR keeps up to 35 days of backups independent of this; disable
+# PITR (modules/gateway/service.tf) for a strict guarantee under 35 days.
+# source_data_retention_days = 90

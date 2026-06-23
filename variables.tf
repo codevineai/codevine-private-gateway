@@ -142,9 +142,20 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver, default '1.1'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s."
+  description = "CodeVine-controlled infra version stamp (semver, default '1.2'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s. 1.2: optional hard data retention (source_data_retention_days)."
   type        = string
-  default     = "1.1"
+  default     = "1.2"
+}
+
+variable "source_data_retention_days" {
+  description = "Hard retention (days) for raw chat source data in S3 + DynamoDB. 0 = retain forever (default). When >0, AWS auto-expires payloads/items, slides active-session TTLs, and caps log retention to match. NOTE: DynamoDB PITR retains up to 35 days independent of this; disable PITR for a strict <35-day guarantee. See modules/gateway/variables.tf for full semantics."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.source_data_retention_days >= 0
+    error_message = "source_data_retention_days must be >= 0 (0 = retain forever)."
+  }
 }
 
 # Audit — account-level CloudTrail + GuardDuty
