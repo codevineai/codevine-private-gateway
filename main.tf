@@ -31,10 +31,6 @@ module "gateway" {
   control_plane_url        = var.control_plane_url
   registration_secret      = var.registration_secret
 
-  # Pod identity override (in-place rebuild only; empty = generate)
-  pod_id      = var.pod_id
-  hmac_secret = var.hmac_secret
-
   gateway_cpu                = var.gateway_cpu
   gateway_memory             = var.gateway_memory
   desired_count              = var.desired_count

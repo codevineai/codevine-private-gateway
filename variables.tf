@@ -38,23 +38,6 @@ variable "registration_secret" {
   default     = ""
 }
 
-# Pod identity override — leave empty for new deployments. Only set when
-# CodeVine instructs you to rebuild an existing pod in place (reuses the
-# existing control-plane registration instead of creating a new one).
-
-variable "pod_id" {
-  description = "Override the generated pod ID. Empty = generate (normal). Set only for an in-place rebuild, per CodeVine instructions."
-  type        = string
-  default     = ""
-}
-
-variable "hmac_secret" {
-  description = "Override the generated pod HMAC secret. Empty = generate (normal). Set together with pod_id for an in-place rebuild."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 # Networking
 
 variable "vpc_cidr" {
@@ -142,9 +125,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver, default '1.3'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization + moved{} contract (no-op for existing deployments)."
+  description = "CodeVine-controlled infra version stamp (semver, default '1.4'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization + moved{} contract (no-op for existing deployments). 1.4: pod identity generated + owned in customer Secrets Manager (no override vars)."
   type        = string
-  default     = "1.3"
+  default     = "1.4"
 }
 
 variable "source_data_retention_days" {

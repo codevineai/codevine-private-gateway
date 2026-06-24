@@ -238,6 +238,16 @@ Tracks the `infra_version` stamp (semver). A bump *usually* means the Terraform
 changed in a way that requires a customer `terraform apply` to take effect — see
 [Updating](#updating). Entries that need no apply say so explicitly. Newest first.
 
+### 1.4
+
+- **Internal hardening — no customer action required.** Pod identity
+  (`GATEWAY_POD_ID` / `GATEWAY_HMAC_SECRET`) is now always generated on first
+  apply and **owned entirely in your account's Secrets Manager** — there are no
+  longer any identity override inputs. Identity is frozen on creation
+  (`ignore_changes`) and never regenerated, matching the control plane's
+  write-once HMAC. No-op for existing deployments (identity already present in
+  Secrets Manager is preserved untouched).
+
 ### 1.3
 
 - **Internal hardening — no customer action required.** Naming is now
@@ -246,8 +256,7 @@ changed in a way that requires a customer `terraform apply` to take effect — s
   migration contract (`modules/gateway/moved.tf`) lets future structural changes
   re-home Terraform state automatically on the next apply instead of forcing a
   manual `state mv`. This version is a **no-op for existing deployments** —
-  `terraform plan` shows no changes attributable to it. Maintainer details:
-  `MIGRATIONS.md`.
+  `terraform plan` shows no changes attributable to it.
 
 ### 1.2
 

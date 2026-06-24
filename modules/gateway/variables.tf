@@ -68,22 +68,6 @@ variable "registration_secret" {
   default     = ""
 }
 
-# Pod identity — leave empty to generate (normal for new pods). Set BOTH to
-# reuse an existing pod's identity during an in-place rebuild (Strategy A).
-
-variable "pod_id" {
-  description = "Override the generated pod ID (GATEWAY_POD_ID). Empty = generate. Set to reuse an existing registered pod's identity."
-  type        = string
-  default     = ""
-}
-
-variable "hmac_secret" {
-  description = "Override the generated pod HMAC secret (GATEWAY_HMAC_SECRET). Empty = generate. Must be set together with pod_id when reusing an existing identity."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 # Networking
 
 variable "vpc_cidr" {
@@ -177,9 +161,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments."
+  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments. 1.4: pod identity always generated + owned in the customer's Secrets Manager (removed pod_id/hmac_secret override vars); identity frozen via ignore_changes."
   type        = string
-  default     = "1.3"
+  default     = "1.4"
 }
 
 variable "source_data_retention_days" {

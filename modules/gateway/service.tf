@@ -32,28 +32,34 @@ locals {
 # ──────────────────────────────────────────────────────────
 # Pod identity + HMAC secret
 #
-# By default these are generated. For an in-place rebuild of an existing pod
-# (e.g. migrating a pod to a new account/state without re-registering with the
-# control plane), pass var.pod_id + var.hmac_secret to reuse the existing
-# identity — the control plane keys the pod row on pod_id and treats the HMAC
-# as immutable, so reusing both preserves the existing registration.
+# Generated ONCE here and written to the pod credentials secret below, which
+# the gateway reads at runtime (via the task def's `valueFrom`). The secret
+# version is `ignore_changes = [secret_string]`, so identity is frozen on first
+# create and NEVER regenerated on subsequent applies — even though these random
+# resources always exist. This matters: the control plane treats a pod's HMAC
+# as immutable (re-registration with a different HMAC is rejected), so identity
+# must be stable for the life of the pod.
+#
+# There is no override variable: every deployment — fresh or migrated — owns its
+# identity in its own Secrets Manager, generated here on first apply. To migrate
+# an existing pod into this model, pre-create the credentials secret with the
+# existing GATEWAY_POD_ID/GATEWAY_HMAC_SECRET before first apply; ignore_changes
+# then preserves it and these random values become inert seed material.
 # ──────────────────────────────────────────────────────────
 
 resource "random_id" "pod_id" {
-  count       = var.pod_id == "" ? 1 : 0
   byte_length = 8
 }
 
 resource "random_password" "hmac_secret" {
-  count            = var.hmac_secret == "" ? 1 : 0
   length           = 32
   special          = true
   override_special = "!$*()_+-[]{}:;.,~"
 }
 
 locals {
-  pod_id_value      = var.pod_id != "" ? var.pod_id : random_id.pod_id[0].hex
-  hmac_secret_value = var.hmac_secret != "" ? var.hmac_secret : random_password.hmac_secret[0].result
+  pod_id_value      = random_id.pod_id.hex
+  hmac_secret_value = random_password.hmac_secret.result
 }
 
 # ──────────────────────────────────────────────────────────

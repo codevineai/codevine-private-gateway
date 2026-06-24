@@ -44,8 +44,7 @@
 #
 # After adding a `moved` block, the plan must show the resource being MOVED
 # (a "# ... has moved to ..." note), NOT destroyed+created. Validate against a
-# real prior-version state before shipping. There is a maintainer runbook at
-# MIGRATIONS.md in the repo root.
+# real prior-version state before shipping.
 #
 # ─── ACTIVE MOVES ────────────────────────────────────────────────────────────
 #
@@ -62,3 +61,20 @@
 #     from = aws_lb.gateway
 #     to   = aws_lb.alb
 #   }
+
+# infra_version 1.4 — pod identity is now generated unconditionally (no
+# pod_id/hmac_secret override vars). The random_* resources were previously
+# count-gated (random_id.pod_id[0]); de-index them so any deployment that had
+# generated identity via the count path adopts the un-indexed address instead
+# of destroying+recreating it. (A deployment that used the override path had no
+# random_* in state at all, so for it these are simply created fresh — inert
+# because the credentials secret is ignore_changes.)
+moved {
+  from = random_id.pod_id[0]
+  to   = random_id.pod_id
+}
+
+moved {
+  from = random_password.hmac_secret[0]
+  to   = random_password.hmac_secret
+}
