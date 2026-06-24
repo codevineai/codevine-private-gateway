@@ -61,7 +61,7 @@ locals {
 # ──────────────────────────────────────────────────────────
 
 resource "aws_s3_bucket" "payload" {
-  bucket = "${var.project_name}-${var.environment}-gateway-dedicated-${var.customer}-${local.account_id}"
+  bucket = "${var.project_name}-${var.environment}-gateway-${local.pod_slug}-${local.account_id}"
 
   tags = { Name = "${local.pod_prefix}-payload" }
 }
@@ -138,8 +138,8 @@ resource "aws_s3_bucket_public_access_block" "payload" {
 # ──────────────────────────────────────────────────────────
 
 resource "aws_secretsmanager_secret" "pod" {
-  name        = "${var.project_name}/${var.environment}/gateway/dedicated-${var.customer}/credentials"
-  description = "Gateway pod credentials for dedicated-${var.customer}"
+  name        = "${var.project_name}/${var.environment}/gateway/${local.pod_slug}/credentials"
+  description = "Gateway pod credentials for ${local.pod_slug}"
 }
 
 resource "aws_secretsmanager_secret_version" "pod" {
@@ -262,7 +262,7 @@ resource "aws_sqs_queue" "inbound" {
 # ──────────────────────────────────────────────────────────
 
 resource "aws_cloudwatch_log_group" "gateway" {
-  name              = "/ecs/${var.project_name}/${var.environment}/gateway/dedicated-${var.customer}"
+  name              = "/ecs/${var.project_name}/${var.environment}/gateway/${local.pod_slug}"
   retention_in_days = local.log_retention_days
 
   tags = { Name = "${local.pod_prefix}-logs" }

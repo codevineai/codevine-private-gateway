@@ -142,9 +142,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver, default '1.2'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s. 1.2: optional hard data retention (source_data_retention_days)."
+  description = "CodeVine-controlled infra version stamp (semver, default '1.3'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization + moved{} contract (no-op for existing deployments)."
   type        = string
-  default     = "1.2"
+  default     = "1.3"
 }
 
 variable "source_data_retention_days" {

@@ -6,7 +6,7 @@ aws_region  = "us-east-1"
 aws_profile = "my-codevine-gateway-admin" # an AWS CLI profile with admin in your account
 
 # --- Assigned by CodeVine ---
-customer                 = "acme"          # your assigned identifier
+customer                 = "acme"              # your assigned identifier
 control_plane_account_id = "996904209118"      # CodeVine control plane account
 control_plane_url        = "https://id.codevine.ai"
 

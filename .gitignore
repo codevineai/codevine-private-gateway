@@ -20,3 +20,9 @@ override.tf.json
 
 # Plans
 *.tfplan
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+.DS_Store

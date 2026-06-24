@@ -49,10 +49,26 @@ locals {
 }
 
 locals {
-  account_id   = data.aws_caller_identity.current.account_id
-  aws_region   = data.aws_region.current.name
-  prefix       = "${var.project_name}-${var.environment}-${var.customer}"
-  pod_prefix   = "${var.project_name}-${var.environment}-gw-dedicated-${var.customer}"
+  account_id = data.aws_caller_identity.current.account_id
+  aws_region = data.aws_region.current.name
+
+  # ── Naming (parameterized for long-term stability) ──────────────────────
+  # Physical resource names derive from a slug + two prefixes, each defaulting
+  # to the original customer formula so existing deployments are byte-for-byte
+  # unchanged (terraform plan == "No changes"). Owned/internal deployments can
+  # override pod_slug / name_prefix to reproduce a different existing naming
+  # scheme without touching this module.
+  #
+  #   pod_slug    -> the "dedicated-{customer}" token used in pod-scoped names
+  #                  (DynamoDB, SQS, ECS service/task, S3 payload, secret, logs,
+  #                   target group, task IAM roles)
+  #   name_prefix -> the "{project}-{env}-{customer}" prefix used in
+  #                  account/region-scoped names (ALB, ECS cluster, deployment role)
+  pod_slug    = var.pod_slug != "" ? var.pod_slug : "dedicated-${var.customer}"
+  name_prefix = var.name_prefix != "" ? var.name_prefix : "${var.project_name}-${var.environment}-${var.customer}"
+
+  prefix       = local.name_prefix
+  pod_prefix   = "${var.project_name}-${var.environment}-gw-${local.pod_slug}"
   gateway_fqdn = "${var.customer}.gateway.${var.domain_name}"
 
   # Tag applied to roles the control plane can assume

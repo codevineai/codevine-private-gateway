@@ -234,9 +234,20 @@ side.
 
 ## Changelog
 
-Tracks the `infra_version` stamp (semver). A bump means the Terraform changed in
-a way that requires a customer `terraform apply` to take effect — see
-[Updating](#updating). Newest first.
+Tracks the `infra_version` stamp (semver). A bump *usually* means the Terraform
+changed in a way that requires a customer `terraform apply` to take effect — see
+[Updating](#updating). Entries that need no apply say so explicitly. Newest first.
+
+### 1.3
+
+- **Internal hardening — no customer action required.** Naming is now
+  parameterized (`pod_slug` / `name_prefix`, both defaulting to the existing
+  scheme) so resource names can evolve without recreating data, and a `moved {}`
+  migration contract (`modules/gateway/moved.tf`) lets future structural changes
+  re-home Terraform state automatically on the next apply instead of forcing a
+  manual `state mv`. This version is a **no-op for existing deployments** —
+  `terraform plan` shows no changes attributable to it. Maintainer details:
+  `MIGRATIONS.md`.
 
 ### 1.2
 

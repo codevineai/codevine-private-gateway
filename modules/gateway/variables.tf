@@ -20,6 +20,23 @@ variable "project_name" {
   default     = "codevine"
 }
 
+# Naming overrides — leave empty for normal customer deployments (names derive
+# from `customer` exactly as before). Set these only for internal/owned
+# deployments that must reproduce a pre-existing naming scheme so Terraform
+# adopts existing resources instead of recreating them.
+
+variable "pod_slug" {
+  description = "Pod-scoped name token. Empty = 'dedicated-{customer}' (default). Drives DynamoDB, SQS, ECS service/task, S3 payload, credentials secret, log group, target group, and task IAM role names."
+  type        = string
+  default     = ""
+}
+
+variable "name_prefix" {
+  description = "Account/region-scoped name prefix. Empty = '{project}-{env}-{customer}' (default). Drives the ALB, ECS cluster, and deployment role names."
+  type        = string
+  default     = ""
+}
+
 variable "environment" {
   description = "Environment name"
   type        = string
@@ -160,9 +177,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days)."
+  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments."
   type        = string
-  default     = "1.2"
+  default     = "1.3"
 }
 
 variable "source_data_retention_days" {
