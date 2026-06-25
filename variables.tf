@@ -66,6 +66,12 @@ variable "private_subnet_cidrs" {
 
 # Scaling
 
+variable "gateway_image_tag" {
+  description = "ECR image tag the gateway pins to (stable per-environment tag; default 'prod'). Image rollouts re-push this tag + restart the service; the task def only changes for non-image reasons. Override to 'dev'/'stage' for non-prod owned environments."
+  type        = string
+  default     = "prod"
+}
+
 variable "gateway_cpu" {
   description = "CPU units for the gateway task"
   type        = number

@@ -255,6 +255,14 @@ changed in a way that requires a customer `terraform apply` to take effect — s
   provide a value as before. Applying is harmless and recommended at your next
   convenient `terraform apply` — verify the plan shows the registration secret
   version **moved** (not destroyed).
+- **Stable image tag + Terraform restarts on task-def change.** The gateway task
+  definition now pins a stable ECR tag (`gateway_image_tag`, default `prod`)
+  instead of `latest`, and Terraform manages the service's task definition again
+  (it no longer ignores it). A `terraform apply` that changes the task def (env
+  vars, sizing, roles) now performs a **rolling restart** onto the new revision.
+  Image releases are unchanged — CodeVine re-pushes the `prod` tag and restarts
+  your gateway out of band. First apply re-pins the image from `latest` to `prod`
+  (same image, a rolling restart). No customer action required.
 
 ### 1.4
 

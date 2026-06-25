@@ -367,7 +367,7 @@ resource "aws_ecs_task_definition" "gateway" {
   container_definitions = jsonencode([
     {
       name      = "gateway"
-      image     = "${aws_ecr_repository.gateway.repository_url}:latest"
+      image     = "${aws_ecr_repository.gateway.repository_url}:${var.gateway_image_tag}"
       essential = true
 
       portMappings = [
@@ -481,7 +481,15 @@ resource "aws_ecs_service" "gateway" {
   tags = { Name = "${local.pod_prefix}-service" }
 
   lifecycle {
-    ignore_changes = [desired_count, task_definition]
+    # Terraform OWNS task_definition: an apply that changes the task def (env
+    # vars, cpu/mem, roles — e.g. APP_ENV/INFRA_VERSION) rolls the running
+    # service onto the new revision. This is safe because the image is a STABLE
+    # env tag (var.gateway_image_tag, e.g. ':prod'), so TF and the deploy
+    # mechanisms agree on the image — TF never reverts a pinned tag. Image
+    # rollouts are still driven outside TF: CI (owned) and the control-plane
+    # deploy (customers) re-push the env tag and force-new-deployment.
+    # desired_count stays ignored (owned by autoscaling).
+    ignore_changes = [desired_count]
   }
 }
 

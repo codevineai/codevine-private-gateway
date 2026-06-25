@@ -43,6 +43,12 @@ variable "environment" {
   default     = "prod"
 }
 
+variable "gateway_image_tag" {
+  description = "ECR image tag the gateway task definition pins to. A STABLE per-environment tag (default 'prod') — image rollouts happen by re-pushing this tag and restarting the service (CI for owned gateways, the control-plane deploy for customers), so the task-def text never churns per image. Override to 'dev'/'stage' for non-prod owned environments."
+  type        = string
+  default     = "prod"
+}
+
 variable "domain_name" {
   description = "Base domain name (e.g. codevine.ai)"
   type        = string
