@@ -78,3 +78,14 @@ moved {
   from = random_password.hmac_secret[0]
   to   = random_password.hmac_secret
 }
+
+# infra_version 1.5 — the registration secret is now generated-or-provided and
+# always written (the count gate is gone), matching the pod-identity model. A
+# deployment that wrote the version via the old count path tracked it at
+# aws_secretsmanager_secret_version.registration[0]; de-index it so the existing
+# (ignore_changes-frozen) value is re-homed to the un-indexed address instead of
+# being destroyed+recreated. Verified intent: plan must show MOVED, not destroy.
+moved {
+  from = aws_secretsmanager_secret_version.registration[0]
+  to   = aws_secretsmanager_secret_version.registration
+}

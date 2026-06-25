@@ -580,9 +580,29 @@ resource "aws_iam_role_policy" "ecr_push" {
 }
 
 # ──────────────────────────────────────────────────────────
-# Registration secret — stored in customer account
-# The gateway reads this to self-register with the control plane.
+# Registration secret — generated-or-provided, owned in the customer account.
+#
+# The gateway reads this to self-register with the control plane. With CodeVine's
+# per-pod registration model, this secret is unique to THIS gateway (it is NOT a
+# shared fleet secret), so — like the pod identity above — the customer's own
+# Terraform can generate it:
+#
+#   - Generate (default): leave var.registration_secret empty and TF writes a
+#     strong random value here. Read it back (terraform output, or from Secrets
+#     Manager) and give it to CodeVine so the pod record can be created with it.
+#   - Provide: set var.registration_secret to a value CodeVine gave you (or one
+#     you generated and handed to CodeVine); TF loads THAT on first apply. You may
+#     then clear the var — ignore_changes keeps the value, so it lives only here.
+#
+# Either way the value is frozen on first create (ignore_changes), so it is never
+# rewritten on later applies — matching how the control plane treats it.
 # ──────────────────────────────────────────────────────────
+
+resource "random_password" "registration_secret" {
+  length           = 48
+  special          = true
+  override_special = "!$*()_+-[]{}:;.,~"
+}
 
 resource "aws_secretsmanager_secret" "registration" {
   name        = "${var.project_name}/${var.environment}/gateway/registration"
@@ -590,11 +610,10 @@ resource "aws_secretsmanager_secret" "registration" {
 }
 
 resource "aws_secretsmanager_secret_version" "registration" {
-  count     = var.registration_secret != "" ? 1 : 0
   secret_id = aws_secretsmanager_secret.registration.id
 
   secret_string = jsonencode({
-    GATEWAY_REGISTRATION_SECRET = var.registration_secret
+    GATEWAY_REGISTRATION_SECRET = var.registration_secret != "" ? var.registration_secret : random_password.registration_secret.result
   })
 
   lifecycle {

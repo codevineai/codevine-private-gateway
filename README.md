@@ -240,13 +240,21 @@ changed in a way that requires a customer `terraform apply` to take effect — s
 
 ### 1.5
 
-- **Internal hardening — no customer action required.** The gateway task now
+- **Environment signal — no customer action required.** The gateway task now
   receives an `APP_ENV=production` container environment variable so the
-  gateway's environment helper reports the correct deployment environment (the
-  cross-language convention shared with the CodeVine backend). Adds one env var
-  to the task definition; no behavioral change for an existing deployment beyond
-  the gateway now correctly knowing it runs in production. Applying is harmless
-  and recommended at your next convenient `terraform apply`.
+  gateway reports the correct deployment environment (the cross-language
+  convention shared with the CodeVine backend). Adds one env var to the task
+  definition; no behavioral change for an existing deployment.
+- **Per-pod registration secret — no customer action required for existing
+  deployments.** The gateway registration secret is now **generated-or-provided**
+  and always written to your Secrets Manager (the old `count` gate that left it
+  empty when no value was supplied is gone), and de-indexed via a `moved {}`
+  block so an existing value is **preserved, not recreated**. New deployments can
+  leave `registration_secret` empty and let Terraform generate it (read it back
+  with `terraform output registration_secret_arn` and send it to CodeVine), or
+  provide a value as before. Applying is harmless and recommended at your next
+  convenient `terraform apply` — verify the plan shows the registration secret
+  version **moved** (not destroyed).
 
 ### 1.4
 
