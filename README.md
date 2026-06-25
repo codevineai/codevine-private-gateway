@@ -238,6 +238,16 @@ Tracks the `infra_version` stamp (semver). A bump *usually* means the Terraform
 changed in a way that requires a customer `terraform apply` to take effect — see
 [Updating](#updating). Entries that need no apply say so explicitly. Newest first.
 
+### 1.5
+
+- **Internal hardening — no customer action required.** The gateway task now
+  receives an `APP_ENV=production` container environment variable so the
+  gateway's environment helper reports the correct deployment environment (the
+  cross-language convention shared with the CodeVine backend). Adds one env var
+  to the task definition; no behavioral change for an existing deployment beyond
+  the gateway now correctly knowing it runs in production. Applying is harmless
+  and recommended at your next convenient `terraform apply`.
+
 ### 1.4
 
 - **Internal hardening — no customer action required.** Pod identity

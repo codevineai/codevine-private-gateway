@@ -380,6 +380,11 @@ resource "aws_ecs_task_definition" "gateway" {
       environment = concat([
         { name = "GATEWAY_PORT", value = "8080" },
         { name = "LOG_DIR", value = "/var/log/gateway" },
+        # Deployment environment, read by the gateway's internal/env package
+        # (APP_ENV is the cross-language source of truth shared with the backend).
+        # A customer-deployed gateway is always a real deployment → "production".
+        # No NODE_ENV: this is a Go service, NODE_ENV would be meaningless here.
+        { name = "APP_ENV", value = "production" },
         { name = "INFRA_VERSION", value = var.infra_version },
         { name = "INFRA_GIT_HASH", value = local.infra_git_hash },
         { name = "S3_PAYLOAD_BUCKET", value = local.pod_s3_bucket_name },

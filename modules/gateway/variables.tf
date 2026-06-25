@@ -161,9 +161,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments. 1.4: pod identity always generated + owned in the customer's Secrets Manager (removed pod_id/hmac_secret override vars); identity frozen via ignore_changes."
+  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments. 1.4: pod identity always generated + owned in the customer's Secrets Manager (removed pod_id/hmac_secret override vars); identity frozen via ignore_changes. 1.5: inject APP_ENV=production container env var so the gateway's internal/env helper reports the correct environment — internal hardening, no-op for existing deployments."
   type        = string
-  default     = "1.4"
+  default     = "1.5"
 }
 
 variable "source_data_retention_days" {
