@@ -71,6 +71,13 @@ locals {
   pod_prefix   = "${var.project_name}-${var.environment}-gw-${local.pod_slug}"
   gateway_fqdn = "${var.customer}.gateway.${var.domain_name}"
 
+  # The repo the gateway task pulls from. Normally this module owns the replicated
+  # repo (codevine/{env}/gateway). When manage_ecr_repo=false (an internal/owned
+  # deployment that runs in the SAME account as the control plane, where that repo
+  # already exists and is owned by the control plane's own Terraform), the module
+  # creates NO ECR resources and pulls from the provided ecr_repo_url instead.
+  gateway_repo_url = var.manage_ecr_repo ? aws_ecr_repository.gateway_replicated[0].repository_url : var.ecr_repo_url
+
   # Tag applied to roles the control plane can assume
   management_tag_key   = var.project_name
   management_tag_value = "gateway-management"
@@ -179,6 +186,7 @@ resource "aws_ecs_cluster" "gateway" {
 # ──────────────────────────────────────────────────────────
 
 resource "aws_ecr_repository" "gateway" {
+  count                = var.manage_ecr_repo ? 1 : 0
   name                 = "${var.project_name}/gateway"
   image_tag_mutability = "MUTABLE"
 
@@ -190,7 +198,8 @@ resource "aws_ecr_repository" "gateway" {
 }
 
 resource "aws_ecr_lifecycle_policy" "gateway" {
-  repository = aws_ecr_repository.gateway.name
+  count      = var.manage_ecr_repo ? 1 : 0
+  repository = aws_ecr_repository.gateway[0].name
 
   policy = jsonencode({
     rules = [
@@ -222,7 +231,8 @@ resource "aws_ecr_lifecycle_policy" "gateway" {
 
 # Allow the control plane to push images to this ECR
 resource "aws_ecr_repository_policy" "cross_account_push" {
-  repository = aws_ecr_repository.gateway.name
+  count      = var.manage_ecr_repo ? 1 : 0
+  repository = aws_ecr_repository.gateway[0].name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -254,6 +264,7 @@ resource "aws_ecr_repository_policy" "cross_account_push" {
 # new image is available in this account automatically. The :env tag is moved
 # here per-pod by CodeVine's Promote action, never auto-propagated.
 resource "aws_ecr_repository" "gateway_replicated" {
+  count                = var.manage_ecr_repo ? 1 : 0
   name                 = "${var.project_name}/${var.environment}/gateway"
   image_tag_mutability = "MUTABLE"
 
@@ -265,7 +276,8 @@ resource "aws_ecr_repository" "gateway_replicated" {
 }
 
 resource "aws_ecr_lifecycle_policy" "gateway_replicated" {
-  repository = aws_ecr_repository.gateway_replicated.name
+  count      = var.manage_ecr_repo ? 1 : 0
+  repository = aws_ecr_repository.gateway_replicated[0].name
 
   policy = jsonencode({
     rules = [
@@ -290,6 +302,7 @@ resource "aws_ecr_lifecycle_policy" "gateway_replicated" {
 # first replication). This is account-level (one policy per registry) and is what
 # makes the control plane's dynamic replication config able to target this account.
 resource "aws_ecr_registry_policy" "allow_control_plane_replication" {
+  count = var.manage_ecr_repo ? 1 : 0
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{

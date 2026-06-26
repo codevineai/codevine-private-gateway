@@ -167,7 +167,7 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments. 1.4: pod identity always generated + owned in the customer's Secrets Manager (removed pod_id/hmac_secret override vars); identity frozen via ignore_changes. 1.5: inject APP_ENV=production container env var so the gateway's internal/env helper reports the correct environment; per-pod registration secret generated-or-provided and always written (removed the count gate; de-indexed registration[0]→registration via moved{} so the existing value is preserved, not recreated) — internal hardening, no-op for existing deployments. 1.6: ECR cross-account replication — adds a registry policy letting CodeVine replicate the gateway image directly into this account (server-side, blobs+manifest) and a replicated repo codevine/{env}/gateway the gateway now pulls from; replaces the control-plane manifest-copy. Requires terraform apply."
+  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments. 1.4: pod identity always generated + owned in the customer's Secrets Manager (removed pod_id/hmac_secret override vars); identity frozen via ignore_changes. 1.5: inject APP_ENV=production container env var so the gateway's internal/env helper reports the correct environment; per-pod registration secret generated-or-provided and always written (removed the count gate; de-indexed registration[0]→registration via moved{} so the existing value is preserved, not recreated) — internal hardening, no-op for existing deployments. 1.6: ECR cross-account replication — adds a registry policy letting CodeVine replicate the gateway image directly into this account (server-side, blobs+manifest) and a replicated repo codevine/{env}/gateway the gateway now pulls from; replaces the control-plane manifest-copy. Requires terraform apply. (Also at 1.6: ECR repo resources are count-gated on var.manage_ecr_repo, default true, so an internal/owned same-account deployment can own NO ECR and pull a provided repo; existing deployments de-index via moved{} — a no-op refactor that does NOT bump infra_version.)"
   type        = string
   default     = "1.6"
 }
@@ -201,4 +201,23 @@ variable "source_data_retention_days" {
     condition     = var.source_data_retention_days >= 0
     error_message = "source_data_retention_days must be >= 0 (0 = retain forever)."
   }
+}
+
+# ECR ownership — normally this module owns the replicated repo (codevine/{env}/gateway)
+# that the control plane replicates into. For an INTERNAL/OWNED deployment running in
+# the SAME account as the control plane, that repo already exists and is owned by the
+# control plane's own Terraform; set manage_ecr_repo=false and pass ecr_repo_url so this
+# module creates NO ECR resources and the task def pulls the provided repo. Default true
+# = normal customer behavior (no-op).
+
+variable "manage_ecr_repo" {
+  description = "Whether this module creates+owns the gateway ECR repo (codevine/{env}/gateway) + its lifecycle/registry policies. Set false for an owned/same-account deployment where the control plane already owns that repo; then ecr_repo_url must be provided."
+  type        = bool
+  default     = true
+}
+
+variable "ecr_repo_url" {
+  description = "Externally-owned ECR repository URL the gateway task pulls from when manage_ecr_repo=false (e.g. <acct>.dkr.ecr.<region>.amazonaws.com/codevine/prod/gateway). Ignored when manage_ecr_repo=true."
+  type        = string
+  default     = ""
 }

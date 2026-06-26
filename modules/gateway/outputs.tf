@@ -54,8 +54,8 @@ output "ecs_cluster_name" {
 }
 
 output "ecr_repository_url" {
-  description = "Customer ECR repository URL (CodeVine pushes the gateway image here)"
-  value       = aws_ecr_repository.gateway.repository_url
+  description = "Customer ECR repository URL (CodeVine pushes the gateway image here). Null when manage_ecr_repo=false (the repo is owned externally)."
+  value       = var.manage_ecr_repo ? aws_ecr_repository.gateway[0].repository_url : null
 }
 
 output "gateway_service_name" {
