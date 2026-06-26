@@ -89,3 +89,40 @@ moved {
   from = aws_secretsmanager_secret_version.registration[0]
   to   = aws_secretsmanager_secret_version.registration
 }
+
+# ECR repo gating (no infra_version bump — pure no-op refactor) — the ECR repo
+# resources are now count-gated on var.manage_ecr_repo (default true) so an
+# internal/owned same-account deployment can set it false and own NO ECR (the
+# control plane owns the repo there). For every existing customer (manage_ecr_repo
+# defaults true) the resources move to index [0]; de-index-FORWARD them so the
+# existing repos + policies are re-homed, NOT destroyed+recreated. Verified intent:
+# plan must show MOVED, not destroy, and no task-def change (INFRA_VERSION unchanged).
+moved {
+  from = aws_ecr_repository.gateway
+  to   = aws_ecr_repository.gateway[0]
+}
+
+moved {
+  from = aws_ecr_lifecycle_policy.gateway
+  to   = aws_ecr_lifecycle_policy.gateway[0]
+}
+
+moved {
+  from = aws_ecr_repository_policy.cross_account_push
+  to   = aws_ecr_repository_policy.cross_account_push[0]
+}
+
+moved {
+  from = aws_ecr_repository.gateway_replicated
+  to   = aws_ecr_repository.gateway_replicated[0]
+}
+
+moved {
+  from = aws_ecr_lifecycle_policy.gateway_replicated
+  to   = aws_ecr_lifecycle_policy.gateway_replicated[0]
+}
+
+moved {
+  from = aws_ecr_registry_policy.allow_control_plane_replication
+  to   = aws_ecr_registry_policy.allow_control_plane_replication[0]
+}
