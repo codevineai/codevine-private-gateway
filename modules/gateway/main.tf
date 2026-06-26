@@ -245,6 +245,67 @@ resource "aws_ecr_repository_policy" "cross_account_push" {
 }
 
 # ──────────────────────────────────────────────────────────
+# Replicated gateway repo — destination of CodeVine's ECR cross-account
+# replication. CodeVine's master ECR (control_plane_account_id) replicates the
+# gateway image into THIS account at the SAME repo path it uses upstream
+# (codevine/{env}/gateway) — ECR replication preserves the repository name, it
+# cannot rename. The gateway task definition pulls from here (see service.tf),
+# so AWS delivers blobs+manifest server-side (no app-level layer copy) and a
+# new image is available in this account automatically. The :env tag is moved
+# here per-pod by CodeVine's Promote action, never auto-propagated.
+resource "aws_ecr_repository" "gateway_replicated" {
+  name                 = "${var.project_name}/${var.environment}/gateway"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = { Name = "${local.prefix}-gateway-replicated-ecr" }
+}
+
+resource "aws_ecr_lifecycle_policy" "gateway_replicated" {
+  repository = aws_ecr_repository.gateway_replicated.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Expire untagged images after 30 days"
+        selection    = { tagStatus = "untagged", countType = "sinceImagePushed", countUnit = "days", countNumber = 30 }
+        action       = { type = "expire" }
+      },
+      {
+        rulePriority = 2
+        description  = "Keep last 50 tagged images"
+        selection    = { tagStatus = "tagged", tagPatternList = ["*"], countType = "imageCountMoreThan", countNumber = 50 }
+        action       = { type = "expire" }
+      }
+    ]
+  })
+}
+
+# Registry-level policy granting CodeVine's account permission to REPLICATE the
+# gateway image into this account's registry (and create the destination repo on
+# first replication). This is account-level (one policy per registry) and is what
+# makes the control plane's dynamic replication config able to target this account.
+resource "aws_ecr_registry_policy" "allow_control_plane_replication" {
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "AllowControlPlaneReplication"
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::${var.control_plane_account_id}:root" }
+      Action = [
+        "ecr:CreateRepository",
+        "ecr:ReplicateImage",
+      ]
+      Resource = "arn:aws:ecr:*:${local.account_id}:repository/${var.project_name}/*"
+    }]
+  })
+}
+
+# ──────────────────────────────────────────────────────────
 # ACM Certificate for {customer}.gateway.codevine.ai
 #
 # DNS-validated. The validation record lives in the codevine.ai zone, which
@@ -580,9 +641,29 @@ resource "aws_iam_role_policy" "ecr_push" {
 }
 
 # ──────────────────────────────────────────────────────────
-# Registration secret — stored in customer account
-# The gateway reads this to self-register with the control plane.
+# Registration secret — generated-or-provided, owned in the customer account.
+#
+# The gateway reads this to self-register with the control plane. With CodeVine's
+# per-pod registration model, this secret is unique to THIS gateway (it is NOT a
+# shared fleet secret), so — like the pod identity above — the customer's own
+# Terraform can generate it:
+#
+#   - Generate (default): leave var.registration_secret empty and TF writes a
+#     strong random value here. Read it back (terraform output, or from Secrets
+#     Manager) and give it to CodeVine so the pod record can be created with it.
+#   - Provide: set var.registration_secret to a value CodeVine gave you (or one
+#     you generated and handed to CodeVine); TF loads THAT on first apply. You may
+#     then clear the var — ignore_changes keeps the value, so it lives only here.
+#
+# Either way the value is frozen on first create (ignore_changes), so it is never
+# rewritten on later applies — matching how the control plane treats it.
 # ──────────────────────────────────────────────────────────
+
+resource "random_password" "registration_secret" {
+  length           = 48
+  special          = true
+  override_special = "!$*()_+-[]{}:;.,~"
+}
 
 resource "aws_secretsmanager_secret" "registration" {
   name        = "${var.project_name}/${var.environment}/gateway/registration"
@@ -590,11 +671,10 @@ resource "aws_secretsmanager_secret" "registration" {
 }
 
 resource "aws_secretsmanager_secret_version" "registration" {
-  count     = var.registration_secret != "" ? 1 : 0
   secret_id = aws_secretsmanager_secret.registration.id
 
   secret_string = jsonencode({
-    GATEWAY_REGISTRATION_SECRET = var.registration_secret
+    GATEWAY_REGISTRATION_SECRET = var.registration_secret != "" ? var.registration_secret : random_password.registration_secret.result
   })
 
   lifecycle {

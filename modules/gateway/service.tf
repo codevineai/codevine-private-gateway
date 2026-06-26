@@ -366,8 +366,12 @@ resource "aws_ecs_task_definition" "gateway" {
 
   container_definitions = jsonencode([
     {
-      name      = "gateway"
-      image     = "${aws_ecr_repository.gateway.repository_url}:latest"
+      name = "gateway"
+      # Pull from the REPLICATED repo (codevine/{env}/gateway) that CodeVine's ECR
+      # replication delivers into this account — NOT the legacy codevine/gateway.
+      # AWS copies blobs+manifest server-side; the :env tag is moved here per-pod
+      # by CodeVine's Promote action.
+      image     = "${aws_ecr_repository.gateway_replicated.repository_url}:${var.gateway_image_tag}"
       essential = true
 
       portMappings = [
@@ -380,6 +384,11 @@ resource "aws_ecs_task_definition" "gateway" {
       environment = concat([
         { name = "GATEWAY_PORT", value = "8080" },
         { name = "LOG_DIR", value = "/var/log/gateway" },
+        # Deployment environment, read by the gateway's internal/env package
+        # (APP_ENV is the cross-language source of truth shared with the backend).
+        # A customer-deployed gateway is always a real deployment → "production".
+        # No NODE_ENV: this is a Go service, NODE_ENV would be meaningless here.
+        { name = "APP_ENV", value = "production" },
         { name = "INFRA_VERSION", value = var.infra_version },
         { name = "INFRA_GIT_HASH", value = local.infra_git_hash },
         { name = "S3_PAYLOAD_BUCKET", value = local.pod_s3_bucket_name },
@@ -396,7 +405,7 @@ resource "aws_ecs_task_definition" "gateway" {
         { name = "OBSERVABILITY_ROLE_ARN", value = aws_iam_role.observability.arn },
         { name = "ECS_CLUSTER_NAME", value = aws_ecs_cluster.gateway.name },
         { name = "ECS_SERVICE_NAME", value = local.pod_service_name },
-        { name = "ECR_REPO_URI", value = aws_ecr_repository.gateway.repository_url },
+        { name = "ECR_REPO_URI", value = aws_ecr_repository.gateway_replicated.repository_url },
         { name = "ALB_DNS_NAME", value = aws_lb.gateway.dns_name },
         { name = "ALB_HOSTED_ZONE_ID", value = aws_lb.gateway.zone_id },
         { name = "DEPLOYMENT_ROLE_ARN", value = aws_iam_role.deployment.arn },
@@ -476,7 +485,15 @@ resource "aws_ecs_service" "gateway" {
   tags = { Name = "${local.pod_prefix}-service" }
 
   lifecycle {
-    ignore_changes = [desired_count, task_definition]
+    # Terraform OWNS task_definition: an apply that changes the task def (env
+    # vars, cpu/mem, roles — e.g. APP_ENV/INFRA_VERSION) rolls the running
+    # service onto the new revision. This is safe because the image is a STABLE
+    # env tag (var.gateway_image_tag, e.g. ':prod'), so TF and the deploy
+    # mechanisms agree on the image — TF never reverts a pinned tag. Image
+    # rollouts are still driven outside TF: CI (owned) and the control-plane
+    # deploy (customers) re-push the env tag and force-new-deployment.
+    # desired_count stays ignored (owned by autoscaling).
+    ignore_changes = [desired_count]
   }
 }
 

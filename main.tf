@@ -31,6 +31,7 @@ module "gateway" {
   control_plane_url        = var.control_plane_url
   registration_secret      = var.registration_secret
 
+  gateway_image_tag          = var.gateway_image_tag
   gateway_cpu                = var.gateway_cpu
   gateway_memory             = var.gateway_memory
   desired_count              = var.desired_count

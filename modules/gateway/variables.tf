@@ -43,6 +43,12 @@ variable "environment" {
   default     = "prod"
 }
 
+variable "gateway_image_tag" {
+  description = "ECR image tag the gateway task definition pins to. A STABLE per-environment tag (default 'prod') — image rollouts happen by re-pushing this tag and restarting the service (CI for owned gateways, the control-plane deploy for customers), so the task-def text never churns per image. Override to 'dev'/'stage' for non-prod owned environments."
+  type        = string
+  default     = "prod"
+}
+
 variable "domain_name" {
   description = "Base domain name (e.g. codevine.ai)"
   type        = string
@@ -62,7 +68,7 @@ variable "control_plane_url" {
 }
 
 variable "registration_secret" {
-  description = "Shared secret for gateway self-registration with the control plane. Leave empty to set the secret value manually in Secrets Manager after apply."
+  description = "Per-pod secret for gateway self-registration with the control plane. OPTIONAL: empty (default) → Terraform generates a strong random value into Secrets Manager; non-empty → that value is loaded and then frozen (ignore_changes). Unique to this gateway, not a shared fleet secret."
   type        = string
   sensitive   = true
   default     = ""
@@ -161,9 +167,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments. 1.4: pod identity always generated + owned in the customer's Secrets Manager (removed pod_id/hmac_secret override vars); identity frozen via ignore_changes."
+  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments. 1.4: pod identity always generated + owned in the customer's Secrets Manager (removed pod_id/hmac_secret override vars); identity frozen via ignore_changes. 1.5: inject APP_ENV=production container env var so the gateway's internal/env helper reports the correct environment; per-pod registration secret generated-or-provided and always written (removed the count gate; de-indexed registration[0]→registration via moved{} so the existing value is preserved, not recreated) — internal hardening, no-op for existing deployments. 1.6: ECR cross-account replication — adds a registry policy letting CodeVine replicate the gateway image directly into this account (server-side, blobs+manifest) and a replicated repo codevine/{env}/gateway the gateway now pulls from; replaces the control-plane manifest-copy. Requires terraform apply."
   type        = string
-  default     = "1.4"
+  default     = "1.6"
 }
 
 variable "source_data_retention_days" {

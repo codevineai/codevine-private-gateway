@@ -29,6 +29,11 @@ output "ecr_repository_url" {
   value       = module.gateway.ecr_repository_url
 }
 
+output "registration_secret_arn" {
+  description = "SEND TO CODEVINE: Secrets Manager ARN of this gateway's registration secret — CodeVine reads the value to create the pod record"
+  value       = module.gateway.registration_secret_arn
+}
+
 output "deployment_role_arn" {
   description = "Cross-account deployment role ARN"
   value       = module.gateway.deployment_role_arn

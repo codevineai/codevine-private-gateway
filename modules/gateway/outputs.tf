@@ -105,3 +105,8 @@ output "sqs_inbound_queue_url" {
   description = "Gateway inbound SQS queue URL"
   value       = aws_sqs_queue.inbound.url
 }
+
+output "registration_secret_arn" {
+  description = "Secrets Manager ARN of the gateway registration secret (CodeVine reads the value here to create this pod's record)"
+  value       = aws_secretsmanager_secret.registration.arn
+}

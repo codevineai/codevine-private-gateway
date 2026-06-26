@@ -14,6 +14,11 @@ control_plane_url        = "https://id.codevine.ai"
 #   export TF_VAR_registration_secret='...'
 # or put it in a gitignored secret.auto.tfvars file.
 
+# --- Image tag (default 'prod') ---
+# The stable ECR tag the gateway runs. Leave default for a customer deployment.
+# CodeVine overrides this to 'dev'/'stage' for its own non-prod gateways.
+# gateway_image_tag = "prod"
+
 # --- Optional sizing (defaults shown) ---
 # gateway_cpu    = 512
 # gateway_memory = 1024

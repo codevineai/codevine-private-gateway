@@ -32,7 +32,7 @@ variable "control_plane_url" {
 }
 
 variable "registration_secret" {
-  description = "Gateway registration secret (provided by CodeVine). Set via TF_VAR_registration_secret or a *.auto.tfvars file you keep out of version control."
+  description = "Per-pod gateway registration secret. OPTIONAL — leave empty (default) to have Terraform GENERATE a strong random value into your Secrets Manager; read it back from `terraform output registration_secret_arn` and give it to CodeVine to create this pod's record. Or PROVIDE a value (TF_VAR_registration_secret / a gitignored *.auto.tfvars) that you handed to CodeVine; it is loaded on first apply and frozen (ignore_changes), so you may clear the var afterward. This is unique to this gateway, not a shared fleet secret."
   type        = string
   sensitive   = true
   default     = ""
@@ -65,6 +65,12 @@ variable "private_subnet_cidrs" {
 }
 
 # Scaling
+
+variable "gateway_image_tag" {
+  description = "ECR image tag the gateway pins to (stable per-environment tag; default 'prod'). Image rollouts re-push this tag + restart the service; the task def only changes for non-image reasons. Override to 'dev'/'stage' for non-prod owned environments."
+  type        = string
+  default     = "prod"
+}
 
 variable "gateway_cpu" {
   description = "CPU units for the gateway task"
@@ -125,9 +131,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver, default '1.4'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization + moved{} contract (no-op for existing deployments). 1.4: pod identity generated + owned in customer Secrets Manager (no override vars)."
+  description = "CodeVine-controlled infra version stamp (semver, default '1.6'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization + moved{} contract (no-op for existing deployments). 1.4: pod identity generated + owned in customer Secrets Manager (no override vars). 1.5: inject APP_ENV=production so the gateway's env helper reports the correct environment; per-pod registration secret now generated-or-provided + always written (count gate removed, de-indexed via moved{}) — no-op for existing deployments. 1.6: ECR cross-account replication — registry policy + replicated repo (codevine/{env}/gateway) the gateway pulls from; replaces the control-plane image copy. Requires terraform apply."
   type        = string
-  default     = "1.4"
+  default     = "1.6"
 }
 
 variable "source_data_retention_days" {

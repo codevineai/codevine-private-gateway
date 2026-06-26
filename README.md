@@ -238,6 +238,45 @@ Tracks the `infra_version` stamp (semver). A bump *usually* means the Terraform
 changed in a way that requires a customer `terraform apply` to take effect — see
 [Updating](#updating). Entries that need no apply say so explicitly. Newest first.
 
+### 1.6
+
+- **ECR image replication — requires `terraform apply`.** The gateway image is now
+  delivered into your account by **AWS ECR cross-account replication** instead of
+  CodeVine pushing it. This adds: (1) a registry-level policy letting CodeVine
+  replicate the gateway image into your account (and create the destination repo),
+  and (2) a replicated repository `codevine/<env>/gateway` that the gateway task
+  now pulls from. AWS copies the image server-side (layers + manifest), so a new
+  build appears in your account automatically and reliably. The deployment tag is
+  still moved per-pod by CodeVine when promoting a release — replication never
+  auto-rolls a running gateway. Apply this version to enable it; the gateway will
+  do a one-time rolling restart onto the replicated repo.
+
+### 1.5
+
+- **Environment signal — no customer action required.** The gateway task now
+  receives an `APP_ENV=production` container environment variable so the
+  gateway reports the correct deployment environment (the cross-language
+  convention shared with the CodeVine backend). Adds one env var to the task
+  definition; no behavioral change for an existing deployment.
+- **Per-pod registration secret — no customer action required for existing
+  deployments.** The gateway registration secret is now **generated-or-provided**
+  and always written to your Secrets Manager (the old `count` gate that left it
+  empty when no value was supplied is gone), and de-indexed via a `moved {}`
+  block so an existing value is **preserved, not recreated**. New deployments can
+  leave `registration_secret` empty and let Terraform generate it (read it back
+  with `terraform output registration_secret_arn` and send it to CodeVine), or
+  provide a value as before. Applying is harmless and recommended at your next
+  convenient `terraform apply` — verify the plan shows the registration secret
+  version **moved** (not destroyed).
+- **Stable image tag + Terraform restarts on task-def change.** The gateway task
+  definition now pins a stable ECR tag (`gateway_image_tag`, default `prod`)
+  instead of `latest`, and Terraform manages the service's task definition again
+  (it no longer ignores it). A `terraform apply` that changes the task def (env
+  vars, sizing, roles) now performs a **rolling restart** onto the new revision.
+  Image releases are unchanged — CodeVine re-pushes the `prod` tag and restarts
+  your gateway out of band. First apply re-pins the image from `latest` to `prod`
+  (same image, a rolling restart). No customer action required.
+
 ### 1.4
 
 - **Internal hardening — no customer action required.** Pod identity
