@@ -238,6 +238,19 @@ Tracks the `infra_version` stamp (semver). A bump *usually* means the Terraform
 changed in a way that requires a customer `terraform apply` to take effect — see
 [Updating](#updating). Entries that need no apply say so explicitly. Newest first.
 
+### 1.6
+
+- **ECR image replication — requires `terraform apply`.** The gateway image is now
+  delivered into your account by **AWS ECR cross-account replication** instead of
+  CodeVine pushing it. This adds: (1) a registry-level policy letting CodeVine
+  replicate the gateway image into your account (and create the destination repo),
+  and (2) a replicated repository `codevine/<env>/gateway` that the gateway task
+  now pulls from. AWS copies the image server-side (layers + manifest), so a new
+  build appears in your account automatically and reliably. The deployment tag is
+  still moved per-pod by CodeVine when promoting a release — replication never
+  auto-rolls a running gateway. Apply this version to enable it; the gateway will
+  do a one-time rolling restart onto the replicated repo.
+
 ### 1.5
 
 - **Environment signal — no customer action required.** The gateway task now

@@ -245,6 +245,67 @@ resource "aws_ecr_repository_policy" "cross_account_push" {
 }
 
 # ──────────────────────────────────────────────────────────
+# Replicated gateway repo — destination of CodeVine's ECR cross-account
+# replication. CodeVine's master ECR (control_plane_account_id) replicates the
+# gateway image into THIS account at the SAME repo path it uses upstream
+# (codevine/{env}/gateway) — ECR replication preserves the repository name, it
+# cannot rename. The gateway task definition pulls from here (see service.tf),
+# so AWS delivers blobs+manifest server-side (no app-level layer copy) and a
+# new image is available in this account automatically. The :env tag is moved
+# here per-pod by CodeVine's Promote action, never auto-propagated.
+resource "aws_ecr_repository" "gateway_replicated" {
+  name                 = "${var.project_name}/${var.environment}/gateway"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = { Name = "${local.prefix}-gateway-replicated-ecr" }
+}
+
+resource "aws_ecr_lifecycle_policy" "gateway_replicated" {
+  repository = aws_ecr_repository.gateway_replicated.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Expire untagged images after 30 days"
+        selection    = { tagStatus = "untagged", countType = "sinceImagePushed", countUnit = "days", countNumber = 30 }
+        action       = { type = "expire" }
+      },
+      {
+        rulePriority = 2
+        description  = "Keep last 50 tagged images"
+        selection    = { tagStatus = "tagged", tagPatternList = ["*"], countType = "imageCountMoreThan", countNumber = 50 }
+        action       = { type = "expire" }
+      }
+    ]
+  })
+}
+
+# Registry-level policy granting CodeVine's account permission to REPLICATE the
+# gateway image into this account's registry (and create the destination repo on
+# first replication). This is account-level (one policy per registry) and is what
+# makes the control plane's dynamic replication config able to target this account.
+resource "aws_ecr_registry_policy" "allow_control_plane_replication" {
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "AllowControlPlaneReplication"
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::${var.control_plane_account_id}:root" }
+      Action = [
+        "ecr:CreateRepository",
+        "ecr:ReplicateImage",
+      ]
+      Resource = "arn:aws:ecr:*:${local.account_id}:repository/${var.project_name}/*"
+    }]
+  })
+}
+
+# ──────────────────────────────────────────────────────────
 # ACM Certificate for {customer}.gateway.codevine.ai
 #
 # DNS-validated. The validation record lives in the codevine.ai zone, which

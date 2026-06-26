@@ -366,8 +366,12 @@ resource "aws_ecs_task_definition" "gateway" {
 
   container_definitions = jsonencode([
     {
-      name      = "gateway"
-      image     = "${aws_ecr_repository.gateway.repository_url}:${var.gateway_image_tag}"
+      name = "gateway"
+      # Pull from the REPLICATED repo (codevine/{env}/gateway) that CodeVine's ECR
+      # replication delivers into this account — NOT the legacy codevine/gateway.
+      # AWS copies blobs+manifest server-side; the :env tag is moved here per-pod
+      # by CodeVine's Promote action.
+      image     = "${aws_ecr_repository.gateway_replicated.repository_url}:${var.gateway_image_tag}"
       essential = true
 
       portMappings = [
@@ -401,7 +405,7 @@ resource "aws_ecs_task_definition" "gateway" {
         { name = "OBSERVABILITY_ROLE_ARN", value = aws_iam_role.observability.arn },
         { name = "ECS_CLUSTER_NAME", value = aws_ecs_cluster.gateway.name },
         { name = "ECS_SERVICE_NAME", value = local.pod_service_name },
-        { name = "ECR_REPO_URI", value = aws_ecr_repository.gateway.repository_url },
+        { name = "ECR_REPO_URI", value = aws_ecr_repository.gateway_replicated.repository_url },
         { name = "ALB_DNS_NAME", value = aws_lb.gateway.dns_name },
         { name = "ALB_HOSTED_ZONE_ID", value = aws_lb.gateway.zone_id },
         { name = "DEPLOYMENT_ROLE_ARN", value = aws_iam_role.deployment.arn },

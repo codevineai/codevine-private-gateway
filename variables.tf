@@ -131,9 +131,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver, default '1.5'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization + moved{} contract (no-op for existing deployments). 1.4: pod identity generated + owned in customer Secrets Manager (no override vars). 1.5: inject APP_ENV=production so the gateway's env helper reports the correct environment; per-pod registration secret now generated-or-provided + always written (count gate removed, de-indexed via moved{}) — no-op for existing deployments."
+  description = "CodeVine-controlled infra version stamp (semver, default '1.6'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization + moved{} contract (no-op for existing deployments). 1.4: pod identity generated + owned in customer Secrets Manager (no override vars). 1.5: inject APP_ENV=production so the gateway's env helper reports the correct environment; per-pod registration secret now generated-or-provided + always written (count gate removed, de-indexed via moved{}) — no-op for existing deployments. 1.6: ECR cross-account replication — registry policy + replicated repo (codevine/{env}/gateway) the gateway pulls from; replaces the control-plane image copy. Requires terraform apply."
   type        = string
-  default     = "1.5"
+  default     = "1.6"
 }
 
 variable "source_data_retention_days" {
