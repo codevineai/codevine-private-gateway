@@ -16,7 +16,7 @@ variable "aws_profile" {
 }
 
 variable "customer" {
-  description = "Your customer identifier, assigned by CodeVine (lowercase, 2-21 chars). Becomes {customer}.gateway.codevine.ai."
+  description = "Resource-name label, assigned by CodeVine (lowercase, 2-21 chars, must match ^[a-z][a-z0-9-]{1,20}$). Prefixes this pod's AWS resource names only — it does NOT affect DNS. A pod is multi-tenant; tenant hostnames ({tenant}.gateway.codevine.ai) are assigned per-tenant at runtime against the wildcard cert."
   type        = string
 }
 
@@ -131,9 +131,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver, default '1.6'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization + moved{} contract (no-op for existing deployments). 1.4: pod identity generated + owned in customer Secrets Manager (no override vars). 1.5: inject APP_ENV=production so the gateway's env helper reports the correct environment; per-pod registration secret now generated-or-provided + always written (count gate removed, de-indexed via moved{}) — no-op for existing deployments. 1.6: ECR cross-account replication — registry policy + replicated repo (codevine/{env}/gateway) the gateway pulls from; replaces the control-plane image copy. Requires terraform apply. (Also at 1.6: ECR repo resources count-gated on manage_ecr_repo, default true, for internal/owned same-account deployments; de-indexed via moved{} — a no-op refactor, no infra_version bump.)"
+  description = "CodeVine-controlled infra version stamp (semver, default '1.6'). Surfaced to the gateway as INFRA_VERSION. Bumped by CodeVine, not customers. 1.1: ALB idle_timeout 300->600s. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization + moved{} contract (no-op for existing deployments). 1.4: pod identity generated + owned in customer Secrets Manager (no override vars). 1.5: inject APP_ENV=production so the gateway's env helper reports the correct environment; per-pod registration secret now generated-or-provided + always written (count gate removed, de-indexed via moved{}) — no-op for existing deployments. 1.6: ECR cross-account replication — registry policy + replicated repo (codevine/{env}/gateway) the gateway pulls from; replaces the control-plane image copy. Requires terraform apply. (Also at 1.6: ECR repo resources count-gated on manage_ecr_repo, default true, for internal/owned same-account deployments; de-indexed via moved{} — a no-op refactor, no infra_version bump.) 1.7: wildcard *.gateway.{domain} cert (was per-customer) + automated validation via in-apply control-plane callback (registration_secret bearer auth); removes the manual send-to-CodeVine step. Requires terraform apply."
   type        = string
-  default     = "1.6"
+  default     = "1.7"
 }
 
 variable "source_data_retention_days" {

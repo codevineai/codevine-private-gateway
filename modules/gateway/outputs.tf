@@ -1,17 +1,19 @@
 # Gateway Module — Outputs
 
 # ──────────────────────────────────────────────────────────
-# DNS validation — SEND THESE TO CODEVINE
+# DNS validation — INFORMATIONAL
 #
-# CodeVine adds this CNAME to the codevine.ai zone to validate the ACM
-# certificate. Until then the cert is PENDING_VALIDATION and HTTPS will
-# not serve a trusted cert.
+# The ACM validation CNAME is added to the {domain} zone AUTOMATICALLY during
+# apply, via the control-plane cert-validation callback (the module POSTs it,
+# authenticated by the registration_secret). This output is retained for
+# visibility/debugging — no manual "send to CodeVine" step is required. Empty
+# when an external cert ARN is provided (gateway_cert_arn).
 # ──────────────────────────────────────────────────────────
 
 output "domain_validation_options" {
-  description = "ACM DNS validation records to send to CodeVine (name + value per domain)"
+  description = "ACM DNS validation records (name + value per domain), added automatically via the control-plane callback during apply. Informational. Empty when an external cert is provided (gateway_cert_arn)."
   value = [
-    for dvo in aws_acm_certificate.gateway.domain_validation_options : {
+    for dvo in(length(aws_acm_certificate.gateway) > 0 ? aws_acm_certificate.gateway[0].domain_validation_options : []) : {
       domain           = dvo.domain_name
       validation_name  = dvo.resource_record_name
       validation_type  = dvo.resource_record_type
@@ -23,11 +25,6 @@ output "domain_validation_options" {
 # ──────────────────────────────────────────────────────────
 # Gateway endpoint
 # ──────────────────────────────────────────────────────────
-
-output "gateway_fqdn" {
-  description = "Gateway FQDN for this customer"
-  value       = local.gateway_fqdn
-}
 
 output "alb_dns_name" {
   description = "Dedicated ALB DNS name (CodeVine points the gateway A-record here)"

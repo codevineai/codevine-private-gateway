@@ -331,10 +331,13 @@ resource "aws_lb_target_group" "gateway" {
 # Uses the validated cert ARN so it waits on the validation gate (see main.tf).
 resource "aws_lb_listener_certificate" "gateway" {
   listener_arn    = aws_lb_listener.https.arn
-  certificate_arn = aws_acm_certificate_validation.gateway.certificate_arn
+  certificate_arn = local.gateway_cert_arn
 }
 
-# Route the gateway FQDN to the gateway target group
+# Route the gateway host(s) to the gateway target group. The default host_header
+# is the *.gateway.{domain} wildcard, so every {tenant}.gateway host on this
+# multi-tenant pod matches; var.gateway_host_header overrides only for a bespoke
+# single-host setup.
 resource "aws_lb_listener_rule" "gateway" {
   listener_arn = aws_lb_listener.https.arn
   priority     = var.listener_rule_priority
@@ -346,7 +349,7 @@ resource "aws_lb_listener_rule" "gateway" {
 
   condition {
     host_header {
-      values = [local.gateway_fqdn]
+      values = [local.listener_host]
     }
   }
 }

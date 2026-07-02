@@ -69,7 +69,6 @@ locals {
 
   prefix       = local.name_prefix
   pod_prefix   = "${var.project_name}-${var.environment}-gw-${local.pod_slug}"
-  gateway_fqdn = "${var.customer}.gateway.${var.domain_name}"
 
   # The repo the gateway task pulls from. Normally this module owns the replicated
   # repo (codevine/{env}/gateway). When manage_ecr_repo=false (an internal/owned
@@ -77,6 +76,26 @@ locals {
   # already exists and is owned by the control plane's own Terraform), the module
   # creates NO ECR resources and pulls from the provided ecr_repo_url instead.
   gateway_repo_url = var.manage_ecr_repo ? aws_ecr_repository.gateway_replicated[0].repository_url : var.ecr_repo_url
+
+  # TLS cert + listener host. Every pod serves the WILDCARD *.gateway.{domain}:
+  # a gateway pod is multi-tenant (many {tenant}.gateway hosts route to one pod),
+  # so a wildcard cert + wildcard listener is the only model. The module issues
+  # its OWN *.gateway.{domain} ACM cert in the operator's account and validates it
+  # via the control-plane callback (see aws_acm_certificate.gateway below). An
+  # external cert ARN may still be provided (var.gateway_cert_arn) to skip cert
+  # creation entirely (e.g. an owned pod reusing an already-issued wildcard ARN).
+  wildcard_domain  = "*.gateway.${var.domain_name}"
+  manage_cert      = var.gateway_cert_arn == ""
+  gateway_cert_arn = var.gateway_cert_arn != "" ? var.gateway_cert_arn : aws_acm_certificate_validation.gateway[0].certificate_arn
+  listener_host    = var.gateway_host_header != "" ? var.gateway_host_header : local.wildcard_domain
+
+  # The registration secret the gateway uses to authenticate to the control plane
+  # (register + the cert-validation callback). Provided value wins; otherwise the
+  # generated one. MUST match what aws_secretsmanager_secret_version.registration
+  # freezes (below) so the callback presents the value the control plane has on
+  # record. Under the issue-first model the operator PROVIDES this (CodeVine minted
+  # it), so var.registration_secret is set on the apply that runs the callback.
+  effective_registration_secret = var.registration_secret != "" ? var.registration_secret : random_password.registration_secret.result
 
   # Tag applied to roles the control plane can assume
   management_tag_key   = var.project_name
@@ -319,37 +338,70 @@ resource "aws_ecr_registry_policy" "allow_control_plane_replication" {
 }
 
 # ──────────────────────────────────────────────────────────
-# ACM Certificate for {customer}.gateway.codevine.ai
+# ACM Certificate for *.gateway.{domain} (wildcard)
 #
-# DNS-validated. The validation record lives in the codevine.ai zone, which
-# CodeVine controls — so this module does NOT create the validation record
-# (the customer has no access to that zone). Instead, the customer runs
-# `terraform output dns_validation_for_codevine` and sends it to CodeVine,
-# who adds the record.
+# DNS-validated. The validation record must live in the {domain} zone, which
+# CodeVine controls — the operator (customer OR CodeVine) has no access to write
+# it directly. So during `terraform apply` the module CALLS BACK to the control
+# plane, authenticated by the registration_secret as a bearer credential, asking
+# it to add the ACM validation CNAME to the zone (see data.external below). ACM
+# then validates asynchronously.
 #
-# aws_acm_certificate_validation below GATES the apply: on the FIRST apply it
-# blocks until the cert reaches ISSUED (i.e. until CodeVine has added the DNS
-# record). This makes the listener's dependency on a *validated* cert explicit
-# and avoids the ALB "UnsupportedCertificate" error from attaching a pending
-# cert. On every SUBSEQUENT apply the cert is already ISSUED, so this resource
-# is a no-op and the apply is single-phase. (Two-phase recurs only if the cert
-# is ever replaced — e.g. a domain change — which does not happen for a fixed
-# {customer}.gateway.codevine.ai FQDN.)
+# Why a wildcard: a gateway pod is multi-tenant — many {tenant}.gateway hosts
+# route to one pod — so one cert must cover them all. ACM DNS-validation tokens
+# are unique per cert per account, so each pod's record is distinct and they do
+# not collide even though every pod uses the same *.gateway.{domain} name.
+#
+# aws_acm_certificate_validation GATES the apply: on the FIRST apply it blocks
+# until the cert reaches ISSUED (i.e. until the callback record has propagated
+# and ACM validated). This makes the listener's dependency on a *validated* cert
+# explicit and avoids the ALB "UnsupportedCertificate" error. On every SUBSEQUENT
+# apply the cert is already ISSUED, so it is a no-op and the apply is single-phase.
 # ──────────────────────────────────────────────────────────
 
 resource "aws_acm_certificate" "gateway" {
-  domain_name       = local.gateway_fqdn
+  count             = local.manage_cert ? 1 : 0
+  domain_name       = local.wildcard_domain
   validation_method = "DNS"
 
   tags = { Name = "${local.prefix}-gateway-cert" }
   lifecycle { create_before_destroy = true }
 }
 
-# Validation gate. No validation_record_fqdns: the records are created
-# out-of-band by CodeVine, so this just polls the cert ARN until ISSUED.
+# Cert-validation callback. During apply, POST the ACM validation record(s) to
+# the control plane (which owns the {domain} zone), authenticated by the
+# registration_secret sent as a bearer credential over TLS. The control plane
+# UPSERTs the CNAME so ACM can validate + auto-renew. Idempotent server-side, so
+# re-applies are harmless. Uses the same sh+curl pattern as data.external.git_hash.
+#
+# Inputs are passed via `query` (stringified by Terraform). jq is NOT assumed;
+# the script reads the JSON from stdin with a tiny sed/grep-free parser via the
+# shell's here-doc. curl + sh are the only host deps (present on any CI/dev box).
+data "external" "cert_validation_callback" {
+  count = local.manage_cert ? 1 : 0
+
+  program = ["sh", "${path.module}/scripts/cert-validation-callback.sh"]
+
+  query = {
+    control_plane_url   = var.control_plane_url
+    registration_secret = local.effective_registration_secret
+    # The ACM validation record for the wildcard cert. domain_validation_options
+    # is a set; the wildcard cert has exactly one entry.
+    record_name  = one(aws_acm_certificate.gateway[0].domain_validation_options).resource_record_name
+    record_value = one(aws_acm_certificate.gateway[0].domain_validation_options).resource_record_value
+    region       = local.aws_region
+  }
+}
+
+# Validation gate. No validation_record_fqdns: the record is created by the
+# control plane via the callback above, so this just polls the cert ARN until
+# ISSUED. depends_on the callback so the record is posted BEFORE we start polling.
 # Configurable timeout so a stuck first apply fails cleanly instead of hanging.
 resource "aws_acm_certificate_validation" "gateway" {
-  certificate_arn = aws_acm_certificate.gateway.arn
+  count           = local.manage_cert ? 1 : 0
+  certificate_arn = aws_acm_certificate.gateway[0].arn
+
+  depends_on = [data.external.cert_validation_callback]
 
   timeouts {
     create = var.cert_validation_timeout
@@ -497,7 +549,7 @@ resource "aws_lb_listener" "https" {
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.gateway.certificate_arn
+  certificate_arn   = local.gateway_cert_arn
 
   default_action {
     type = "fixed-response"
@@ -687,7 +739,7 @@ resource "aws_secretsmanager_secret_version" "registration" {
   secret_id = aws_secretsmanager_secret.registration.id
 
   secret_string = jsonencode({
-    GATEWAY_REGISTRATION_SECRET = var.registration_secret != "" ? var.registration_secret : random_password.registration_secret.result
+    GATEWAY_REGISTRATION_SECRET = local.effective_registration_secret
   })
 
   lifecycle {

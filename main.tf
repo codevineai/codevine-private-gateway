@@ -4,10 +4,12 @@
 # self-contained gateway pod: VPC, ECS cluster, ECR, ALB, ACM cert, and
 # the gateway workload (ECS service, SQS, DynamoDB, S3, IAM, autoscaling).
 #
-# DNS for {customer}.gateway.codevine.ai is managed by CodeVine. After
-# apply, send the `domain_validation_options` output to CodeVine so they
-# can validate the TLS certificate and point the gateway hostname at your
-# ALB. See README.md.
+# DNS is managed by CodeVine. Cert validation is automatic: during apply the
+# module posts its ACM validation record to the control plane (authenticated by
+# the registration_secret), which adds the CNAME to the codevine.ai zone — no
+# manual step. Per-tenant hostnames ({tenant}.gateway.codevine.ai) are assigned
+# at runtime against the wildcard cert. The pod self-reports its ALB DNS to the
+# control plane via heartbeat, so there is nothing to send by hand. See README.md.
 
 provider "aws" {
   region  = var.aws_region

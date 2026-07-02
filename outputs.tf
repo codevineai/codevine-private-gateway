@@ -1,16 +1,16 @@
 # Root outputs.
 #
-# After `terraform apply`, run `terraform output dns_validation_for_codevine`
-# and send the result to CodeVine to complete certificate validation and
-# DNS setup.
+# Certificate validation is automatic: during `terraform apply` the module posts
+# its ACM validation record to the CodeVine control plane (authenticated by the
+# registration_secret), which adds it to the codevine.ai zone. No manual step.
 
-output "dns_validation_for_codevine" {
-  description = "SEND TO CODEVINE: ACM DNS validation record(s) to add to the codevine.ai zone"
+output "cert_validation_records" {
+  description = "ACM DNS validation record(s) — added automatically to the codevine.ai zone via the control-plane callback during apply. Informational/debugging only."
   value       = module.gateway.domain_validation_options
 }
 
 output "alb_dns_name" {
-  description = "SEND TO CODEVINE: ALB DNS name to point {customer}.gateway.codevine.ai at"
+  description = "This pod's ALB DNS name. The gateway self-reports it to the control plane via heartbeat (used for per-tenant DNS routing) — informational here, no manual step."
   value       = module.gateway.alb_dns_name
 }
 
@@ -19,18 +19,13 @@ output "alb_zone_id" {
   value       = module.gateway.alb_zone_id
 }
 
-output "gateway_fqdn" {
-  description = "Gateway FQDN"
-  value       = module.gateway.gateway_fqdn
-}
-
 output "ecr_repository_url" {
   description = "ECR repository URL (CodeVine pushes the gateway image here)"
   value       = module.gateway.ecr_repository_url
 }
 
 output "registration_secret_arn" {
-  description = "SEND TO CODEVINE: Secrets Manager ARN of this gateway's registration secret — CodeVine reads the value to create the pod record"
+  description = "Secrets Manager ARN of this pod's registration secret. Only relevant on the GENERATE path (registration_secret left empty): read the value and hand it to CodeVine to create the pod record. On the issue-first path (CodeVine minted the secret and you pasted it in) this is unused."
   value       = module.gateway.registration_secret_arn
 }
 

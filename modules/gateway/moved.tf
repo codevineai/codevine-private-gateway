@@ -126,3 +126,20 @@ moved {
   from = aws_ecr_registry_policy.allow_control_plane_replication
   to   = aws_ecr_registry_policy.allow_control_plane_replication[0]
 }
+
+# ACM cert gating (no infra_version bump — no-op refactor) — the gateway cert +
+# its validation are now count-gated on whether an external cert ARN is provided
+# (var.gateway_cert_arn). An internal/owned multi-tenant pod reuses the existing
+# *.gateway wildcard cert and creates neither. For every existing customer
+# (gateway_cert_arn empty → manage_cert true) the resources move to index [0];
+# de-index-FORWARD so the existing cert + validation are re-homed, NOT recreated
+# (recreating a cert would briefly break the ALB listener). Plan must show MOVED.
+moved {
+  from = aws_acm_certificate.gateway
+  to   = aws_acm_certificate.gateway[0]
+}
+
+moved {
+  from = aws_acm_certificate_validation.gateway
+  to   = aws_acm_certificate_validation.gateway[0]
+}

@@ -167,9 +167,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments. 1.4: pod identity always generated + owned in the customer's Secrets Manager (removed pod_id/hmac_secret override vars); identity frozen via ignore_changes. 1.5: inject APP_ENV=production container env var so the gateway's internal/env helper reports the correct environment; per-pod registration secret generated-or-provided and always written (removed the count gate; de-indexed registration[0]→registration via moved{} so the existing value is preserved, not recreated) — internal hardening, no-op for existing deployments. 1.6: ECR cross-account replication — adds a registry policy letting CodeVine replicate the gateway image directly into this account (server-side, blobs+manifest) and a replicated repo codevine/{env}/gateway the gateway now pulls from; replaces the control-plane manifest-copy. Requires terraform apply. (Also at 1.6: ECR repo resources are count-gated on var.manage_ecr_repo, default true, so an internal/owned same-account deployment can own NO ECR and pull a provided repo; existing deployments de-index via moved{} — a no-op refactor that does NOT bump infra_version.)"
+  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments. 1.4: pod identity always generated + owned in the customer's Secrets Manager (removed pod_id/hmac_secret override vars); identity frozen via ignore_changes. 1.5: inject APP_ENV=production container env var so the gateway's internal/env helper reports the correct environment; per-pod registration secret generated-or-provided and always written (removed the count gate; de-indexed registration[0]→registration via moved{} so the existing value is preserved, not recreated) — internal hardening, no-op for existing deployments. 1.6: ECR cross-account replication — adds a registry policy letting CodeVine replicate the gateway image directly into this account (server-side, blobs+manifest) and a replicated repo codevine/{env}/gateway the gateway now pulls from; replaces the control-plane manifest-copy. Requires terraform apply. (Also at 1.6: ECR repo resources are count-gated on var.manage_ecr_repo, default true, so an internal/owned same-account deployment can own NO ECR and pull a provided repo; existing deployments de-index via moved{} — a no-op refactor that does NOT bump infra_version.)  1.7: wildcard cert + automated validation. The pod now issues its OWN *.gateway.{domain} ACM cert (was per-{customer}.gateway) and validates it via an in-apply callback — the module POSTs the ACM validation record to the control plane (authenticated by the registration_secret as a bearer credential) which adds the CNAME to the {domain} zone. Removes the manual 'send dns_validation_for_codevine to CodeVine' step. Wildcard is required because a pod is multi-tenant (many {tenant}.gateway hosts → one pod). Host dep: curl (already required for any control-plane interaction). Requires terraform apply (new cert)."
   type        = string
-  default     = "1.6"
+  default     = "1.7"
 }
 
 variable "source_data_retention_days" {
@@ -218,6 +218,25 @@ variable "manage_ecr_repo" {
 
 variable "ecr_repo_url" {
   description = "Externally-owned ECR repository URL the gateway task pulls from when manage_ecr_repo=false (e.g. <acct>.dkr.ecr.<region>.amazonaws.com/codevine/prod/gateway). Ignored when manage_ecr_repo=true."
+  type        = string
+  default     = ""
+}
+
+# TLS / hostname — the module creates a DNS-validated WILDCARD cert for
+# *.gateway.{domain}, valid for every {tenant}.gateway host, and matches the
+# wildcard on the listener. A pod is multi-tenant, so wildcard is the only cert
+# model. An internal/owned pod may instead REUSE an already-issued wildcard cert
+# by passing its ARN (gateway_cert_arn), in which case the module creates no cert
+# and no DNS validation record.
+
+variable "gateway_cert_arn" {
+  description = "Externally-provided ACM certificate ARN for the ALB HTTPS listener. When set, the module creates NO cert and NO DNS validation (and writes no validation record) — used by an owned pod reusing an already-issued *.gateway.{domain} wildcard. Empty (default) = the module creates+validates its own *.gateway.{domain} wildcard cert."
+  type        = string
+  default     = ""
+}
+
+variable "gateway_host_header" {
+  description = "Listener-rule host_header match. Empty (default) = the *.gateway.{domain} wildcard (multi-tenant; every {tenant}.gateway host routes here). Override only for a bespoke single-host setup."
   type        = string
   default     = ""
 }
