@@ -1,16 +1,12 @@
-variable "project_name" {
-  description = "Project name for resource naming"
-  type        = string
-}
-
-variable "environment" {
-  description = "Environment name"
-  type        = string
-}
-
 variable "name" {
-  description = "Name suffix for the WAF (e.g. 'alb', 'gateway-acme')"
+  description = "Full base name for the WAF resources (the gateway's cv-gw-{env}-{pod_name}); the module appends -waf / -waf-logs."
   type        = string
+}
+
+variable "tags" {
+  description = "Common tags to apply to WAF resources."
+  type        = map(string)
+  default     = {}
 }
 
 variable "alb_arn" {

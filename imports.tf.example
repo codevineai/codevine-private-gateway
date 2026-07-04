@@ -1,0 +1,46 @@
+# Import templates — adopt EXISTING stateful resources into this Terraform state
+# without destroy+recreate / data loss. Use when moving an owned pod (e.g.
+# Luminary) onto infra_version 1.8, or re-homing after the naming reset.
+#
+# HOW TO USE
+#   1. Copy the blocks you need into a real `imports.tf` (this .example file is
+#      ignored by Terraform).
+#   2. Fill each `id` with the existing resource's physical id/name/ARN.
+#   3. Set var.pod_name / var.environment so the module's cv-gw-{env}-{pod_name}-*
+#      names MATCH the physical names you are importing — otherwise the plan will
+#      show a rename (= replace), not a clean adoption.
+#   4. `terraform plan` — every imported resource must show "will be imported"
+#      then NO destroy (benign tag/config updates are fine).
+#   5. `terraform apply`, then DELETE the import blocks (they are one-shot).
+#
+# DO NOT import random_id.pod_id / random_password.* — they read back wrong and
+# plan as replace, breaking pod identity. Instead PRE-SEED the credentials secret
+# (GATEWAY_POD_ID / GATEWAY_HMAC_SECRET) before first apply so ignore_changes
+# preserves it. See docs + dedicated-gateway-tf-maintenance.md.
+#
+# Note: the VPC does NOT need an import — to reuse an existing network, set the
+# vpc_id / public_subnet_ids / private_subnet_ids variables instead (BYO network).
+
+# --- DynamoDB data table (preserves all chat data) ---
+# import {
+#   to = module.gateway.aws_dynamodb_table.data
+#   id = "cv-gw-prod-luminary-data"
+# }
+
+# --- S3 payload bucket (preserves all request/response payloads) ---
+# import {
+#   to = module.gateway.aws_s3_bucket.payload
+#   id = "cv-gw-prod-luminary-payloads-123456789012"
+# }
+
+# --- Pod credentials secret (preserves pod identity: GATEWAY_POD_ID/HMAC) ---
+# import {
+#   to = module.gateway.aws_secretsmanager_secret.pod
+#   id = "arn:aws:secretsmanager:us-east-1:123456789012:secret:cv-gw-prod-luminary-credentials-AbCdEf"
+# }
+
+# --- Registration secret ---
+# import {
+#   to = module.gateway.aws_secretsmanager_secret.registration
+#   id = "arn:aws:secretsmanager:us-east-1:123456789012:secret:cv-gw-prod-luminary-registration-AbCdEf"
+# }

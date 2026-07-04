@@ -9,8 +9,8 @@
 # to switch to BLOCK after validating no false positives.
 
 resource "aws_wafv2_web_acl" "main" {
-  name        = "${var.project_name}-${var.environment}-${var.name}-waf"
-  description = "WAF for ${var.name} - ${var.environment}"
+  name        = "${var.name}-waf"
+  description = "WAF for ${var.name}"
   scope       = "REGIONAL"
 
   default_action {
@@ -53,7 +53,7 @@ resource "aws_wafv2_web_acl" "main" {
 
     visibility_config {
       cloudwatch_metrics_enabled = true
-      metric_name                = "${var.project_name}-${var.environment}-${var.name}-common"
+      metric_name                = "${var.name}-common"
       sampled_requests_enabled   = true
     }
   }
@@ -83,7 +83,7 @@ resource "aws_wafv2_web_acl" "main" {
 
     visibility_config {
       cloudwatch_metrics_enabled = true
-      metric_name                = "${var.project_name}-${var.environment}-${var.name}-ip-reputation"
+      metric_name                = "${var.name}-ip-reputation"
       sampled_requests_enabled   = true
     }
   }
@@ -113,22 +113,18 @@ resource "aws_wafv2_web_acl" "main" {
 
     visibility_config {
       cloudwatch_metrics_enabled = true
-      metric_name                = "${var.project_name}-${var.environment}-${var.name}-rate-limit"
+      metric_name                = "${var.name}-rate-limit"
       sampled_requests_enabled   = true
     }
   }
 
   visibility_config {
     cloudwatch_metrics_enabled = true
-    metric_name                = "${var.project_name}-${var.environment}-${var.name}-waf"
+    metric_name                = "${var.name}-waf"
     sampled_requests_enabled   = true
   }
 
-  tags = {
-    Name        = "${var.project_name}-${var.environment}-${var.name}-waf"
-    Environment = var.environment
-    Project     = var.project_name
-  }
+  tags = merge(var.tags, { Name = "${var.name}-waf" })
 }
 
 # Associate the WebACL with the ALB
@@ -140,14 +136,10 @@ resource "aws_wafv2_web_acl_association" "main" {
 # CloudWatch log group for WAF (optional)
 resource "aws_cloudwatch_log_group" "waf" {
   count             = var.enable_logging ? 1 : 0
-  name              = "aws-waf-logs-${var.project_name}-${var.environment}-${var.name}"
+  name              = "aws-waf-logs-${var.name}"
   retention_in_days = 30
 
-  tags = {
-    Name        = "${var.project_name}-${var.environment}-${var.name}-waf-logs"
-    Environment = var.environment
-    Project     = var.project_name
-  }
+  tags = merge(var.tags, { Name = "${var.name}-waf-logs" })
 }
 
 resource "aws_wafv2_web_acl_logging_configuration" "main" {

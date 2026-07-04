@@ -1,199 +1,239 @@
-# Gateway Module — Variables
-#
-# `customer`, `control_plane_account_id`, `control_plane_url`, and
-# `registration_secret` are the customer-specific inputs. Everything
-# else has sensible defaults.
+# Gateway pod module — variables.
 
-variable "customer" {
-  description = "Customer identifier (lowercase, alphanumeric + hyphens). Used in resource names and DNS."
+# ── Identity / naming ────────────────────────────────────────────────────────
+
+variable "pod_name" {
+  description = "The SOLE per-pod identifier. Every physical name is cv-gw-{environment}-{pod_name}-{type}, so multiple pods coexist in one account. Lowercase alphanumeric + hyphens, 2-15 chars, starting with a letter (e.g. 'luminary', 'owned-1')."
   type        = string
 
   validation {
-    condition     = can(regex("^[a-z][a-z0-9-]{1,20}$", var.customer))
-    error_message = "customer must be lowercase alphanumeric + hyphens, 2-21 chars, starting with a letter"
+    condition     = can(regex("^[a-z][a-z0-9-]{1,14}$", var.pod_name))
+    error_message = "pod_name must be lowercase alphanumeric + hyphens, 2-15 chars, starting with a letter."
+  }
+
+  # Keeps the 32-char-capped names (ALB, target group) within limits without
+  # truncation: cv-gw-{env}-{pod_name}-alb is 11 + len(env) + len(pod_name).
+  validation {
+    condition     = length(var.environment) + length(var.pod_name) <= 21
+    error_message = "environment + pod_name must be <= 21 chars combined so the 32-char-capped ALB and target-group names never truncate."
   }
 }
 
+variable "customer" {
+  description = "Customer/owner label for tagging + billing only (never in a physical name). Optional."
+  type        = string
+  default     = ""
+}
+
 variable "project_name" {
-  description = "Project name for resource naming"
+  description = "Project name — used only in cross-account IAM/Bedrock ARNs + tag conventions. Leave default."
   type        = string
   default     = "codevine"
 }
 
-# Naming overrides — leave empty for normal customer deployments (names derive
-# from `customer` exactly as before). Set these only for internal/owned
-# deployments that must reproduce a pre-existing naming scheme so Terraform
-# adopts existing resources instead of recreating them.
-
-variable "pod_slug" {
-  description = "Pod-scoped name token. Empty = 'dedicated-{customer}' (default). Drives DynamoDB, SQS, ECS service/task, S3 payload, credentials secret, log group, target group, and task IAM role names."
-  type        = string
-  default     = ""
-}
-
-variable "name_prefix" {
-  description = "Account/region-scoped name prefix. Empty = '{project}-{env}-{customer}' (default). Drives the ALB, ECS cluster, and deployment role names."
-  type        = string
-  default     = ""
-}
-
 variable "environment" {
-  description = "Environment name"
+  description = "Environment segment of every name (cv-gw-{environment}-{pod_name}). Keep short."
   type        = string
   default     = "prod"
-}
 
-variable "gateway_image_tag" {
-  description = "ECR image tag the gateway task definition pins to. A STABLE per-environment tag (default 'prod') — image rollouts happen by re-pushing this tag and restarting the service (CI for owned gateways, the control-plane deploy for customers), so the task-def text never churns per image. Override to 'dev'/'stage' for non-prod owned environments."
-  type        = string
-  default     = "prod"
+  validation {
+    condition     = length(var.environment) <= 8
+    error_message = "environment must be <= 8 chars (e.g. prod/stage/dev)."
+  }
 }
 
 variable "domain_name" {
-  description = "Base domain name (e.g. codevine.ai)"
+  description = "Base domain for the wildcard cert (*.gateway.{domain_name})."
   type        = string
   default     = "codevine.ai"
 }
 
-# Cross-account integration (all OUTBOUND from the customer account)
+variable "tags" {
+  description = "Additional tags applied to all pod resources."
+  type        = map(string)
+  default     = {}
+}
+
+# ── Control-plane integration ────────────────────────────────────────────────
 
 variable "control_plane_account_id" {
-  description = "AWS account ID of the CodeVine control plane. Trust principal for the deployment, ECR-push, and observability roles."
+  description = "CodeVine control plane AWS account ID. Trust principal for the deployment + observability roles."
   type        = string
 }
 
 variable "control_plane_url" {
-  description = "Control plane base URL for gateway heartbeat/registration (e.g. https://id.codevine.ai)"
+  description = "Control plane base URL for register / heartbeat / cert-validation callback."
   type        = string
 }
 
 variable "registration_secret" {
-  description = "Per-pod secret for gateway self-registration with the control plane. OPTIONAL: empty (default) → Terraform generates a strong random value into Secrets Manager; non-empty → that value is loaded and then frozen (ignore_changes). Unique to this gateway, not a shared fleet secret."
+  description = "Per-pod bootstrap secret. Empty (default) = Terraform generates one; non-empty = that value is loaded and frozen. Unique to this pod."
   type        = string
   sensitive   = true
   default     = ""
 }
 
-# Networking
+# ── ECR (from the account module) ────────────────────────────────────────────
+
+variable "ecr_repo_url" {
+  description = "URL of the shared gateway ECR repo the task pulls from (modules/account output). Required — an empty value yields un-pullable tasks."
+  type        = string
+
+  validation {
+    condition     = var.ecr_repo_url != ""
+    error_message = "ecr_repo_url must be set (from the account module output, or provided for a same-env additional pod). An empty value produces CannotPullContainerError at runtime."
+  }
+}
+
+variable "ecr_push_role_arn" {
+  description = "ARN of the shared ECR push role (modules/account output). Reported on heartbeat; optional (empty ok)."
+  type        = string
+  default     = ""
+}
+
+# ── TLS / hostname ───────────────────────────────────────────────────────────
+
+variable "gateway_cert_arn" {
+  description = "Reuse an existing *.gateway.{domain} ACM cert by ARN instead of creating+validating one. Empty (default) = create + validate via the control-plane callback."
+  type        = string
+  default     = ""
+}
+
+variable "gateway_host_header" {
+  description = "Override the ALB listener host_header match. Empty (default) = the *.gateway.{domain} wildcard."
+  type        = string
+  default     = ""
+}
+
+variable "listener_rule_priority" {
+  description = "Priority for this pod's ALB listener rule (only matters if multiple pods share a listener)."
+  type        = number
+  default     = 10
+}
+
+# ── Networking (create-or-bring-your-own) ────────────────────────────────────
+
+variable "vpc_id" {
+  description = "Existing VPC ID to deploy into. Empty (default) = the module creates its own VPC. When set, public_subnet_ids + private_subnet_ids are required."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.vpc_id == "" || (length(var.public_subnet_ids) > 0 && length(var.private_subnet_ids) > 0)
+    error_message = "When vpc_id is set, both public_subnet_ids and private_subnet_ids must be non-empty."
+  }
+}
+
+variable "public_subnet_ids" {
+  description = "Existing public subnet IDs (ALB) when vpc_id is set."
+  type        = list(string)
+  default     = []
+}
+
+variable "private_subnet_ids" {
+  description = "Existing private subnet IDs (ECS tasks) when vpc_id is set."
+  type        = list(string)
+  default     = []
+}
 
 variable "vpc_cidr" {
-  description = "VPC CIDR block"
+  description = "VPC CIDR when the module creates its own VPC."
   type        = string
   default     = "10.0.0.0/16"
 }
 
 variable "availability_zones" {
-  description = "Availability zones for subnets"
+  description = "AZs for the created subnets (must match the region)."
   type        = list(string)
   default     = ["us-east-1a", "us-east-1b"]
 }
 
 variable "public_subnet_cidrs" {
-  description = "CIDR blocks for public subnets (one per AZ)"
+  description = "Public subnet CIDRs (one per AZ), used only when creating a VPC."
   type        = list(string)
   default     = ["10.0.1.0/24", "10.0.2.0/24"]
 }
 
 variable "private_subnet_cidrs" {
-  description = "CIDR blocks for private subnets (one per AZ)"
+  description = "Private subnet CIDRs (one per AZ), used only when creating a VPC."
   type        = list(string)
   default     = ["10.0.10.0/24", "10.0.11.0/24"]
 }
 
-# Scaling
+# ── Sizing / scaling ─────────────────────────────────────────────────────────
+
+variable "gateway_image_tag" {
+  description = "ECR image tag the task pins to (stable per-env tag; default 'prod'). Rollouts re-push the tag + restart."
+  type        = string
+  default     = "prod"
+}
 
 variable "gateway_cpu" {
-  description = "CPU units for gateway task"
+  description = "CPU units for the gateway task."
   type        = number
   default     = 512
 }
 
 variable "gateway_memory" {
-  description = "Memory (MiB) for gateway task"
+  description = "Memory (MiB) for the gateway task."
   type        = number
   default     = 1024
 }
 
 variable "desired_count" {
-  description = "Desired number of gateway tasks"
+  description = "Desired number of gateway tasks."
   type        = number
   default     = 2
 }
 
 variable "min_count" {
-  description = "Minimum number of gateway tasks"
+  description = "Minimum gateway tasks (autoscaling floor)."
   type        = number
   default     = 1
 }
 
 variable "max_count" {
-  description = "Maximum number of gateway tasks"
+  description = "Maximum gateway tasks (autoscaling ceiling)."
   type        = number
   default     = 10
 }
 
-variable "listener_rule_priority" {
-  description = "Priority for the ALB listener rule"
-  type        = number
-  default     = 10
-}
-
-# WAF
+# ── WAF ──────────────────────────────────────────────────────────────────────
 
 variable "enable_waf" {
-  description = "Enable WAF WebACL on the gateway ALB"
+  description = "Enable a WAF WebACL on the gateway ALB."
   type        = bool
   default     = false
 }
 
 variable "waf_count_mode" {
-  description = "When true, WAF rules COUNT instead of BLOCK (initial rollout)"
+  description = "When true, WAF rules COUNT instead of BLOCK (initial rollout)."
   type        = bool
   default     = true
 }
 
-# Operational
+# ── Operational ──────────────────────────────────────────────────────────────
 
 variable "enable_deletion_protection" {
-  description = "Enable ALB deletion protection. Set false to allow teardown."
+  description = "Deletion protection for the ALB and DynamoDB table. Set false only to allow teardown."
   type        = bool
   default     = true
 }
 
 variable "cert_validation_timeout" {
-  description = "How long the first apply waits for ACM to validate the cert (i.e. for CodeVine to add the DNS record). Format like '45m'."
+  description = "How long the first apply waits for ACM to validate the cert (format like '45m')."
   type        = string
   default     = "45m"
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION (and onto the heartbeat). Bumped deliberately by CodeVine; not a customer-facing knob. 1.1: ALB idle_timeout 300->600s so the gateway's 300s stream-inactivity timer fires first. 1.2: optional hard data retention (source_data_retention_days). 1.3: naming parameterization (pod_slug/name_prefix) + moved{} migration contract — internal hardening, no-op for existing deployments. 1.4: pod identity always generated + owned in the customer's Secrets Manager (removed pod_id/hmac_secret override vars); identity frozen via ignore_changes. 1.5: inject APP_ENV=production container env var so the gateway's internal/env helper reports the correct environment; per-pod registration secret generated-or-provided and always written (removed the count gate; de-indexed registration[0]→registration via moved{} so the existing value is preserved, not recreated) — internal hardening, no-op for existing deployments. 1.6: ECR cross-account replication — adds a registry policy letting CodeVine replicate the gateway image directly into this account (server-side, blobs+manifest) and a replicated repo codevine/{env}/gateway the gateway now pulls from; replaces the control-plane manifest-copy. Requires terraform apply. (Also at 1.6: ECR repo resources are count-gated on var.manage_ecr_repo, default true, so an internal/owned same-account deployment can own NO ECR and pull a provided repo; existing deployments de-index via moved{} — a no-op refactor that does NOT bump infra_version.)  1.7: wildcard cert + automated validation. The pod now issues its OWN *.gateway.{domain} ACM cert (was per-{customer}.gateway) and validates it via an in-apply callback — the module POSTs the ACM validation record to the control plane (authenticated by the registration_secret as a bearer credential) which adds the CNAME to the {domain} zone. Removes the manual 'send dns_validation_for_codevine to CodeVine' step. Wildcard is required because a pod is multi-tenant (many {tenant}.gateway hosts → one pod). Host dep: curl (already required for any control-plane interaction). Requires terraform apply (new cert)."
+  description = "CodeVine-controlled infra version stamp (semver), surfaced to the gateway as INFRA_VERSION. 2.0: clean-baseline rewrite — account/pod module split, one consistent cv-gw-{env}-{pod_name} naming scheme, BYO network, http-provider cert callback."
   type        = string
-  default     = "1.7"
+  default     = "2.0"
 }
 
 variable "source_data_retention_days" {
-  description = <<-EOT
-    Hard retention period (in days) for raw chat SOURCE data — the request/response
-    payloads in S3 and the items in DynamoDB. This is a customer-controlled, AWS-enforced
-    "hard delete" lever, independent of any soft retention applied to derived metadata.
-
-    0 (default) = retain forever; no expiration is configured and existing pods are
-    unaffected. When > 0:
-      - DynamoDB: the gateway stamps an ExpiresAt TTL on each item (REQ#/UPLOAD#/CHUNK#),
-        and slides the SESSION# record's TTL forward on every new request so active
-        sessions never expire mid-life. AWS reaps expired items.
-      - S3: the payload bucket expires both current objects AND noncurrent versions at
-        this age (the bucket is versioned, so both are required for a true hard delete).
-      - CloudWatch logs: gateway log retention is capped to the largest allowed value
-        <= this period, so logs do not outlive the data window.
-
-    CAVEAT — DynamoDB Point-In-Time Recovery (PITR) is enabled on the data table and
-    retains up to 35 days of continuous backups INDEPENDENT of this TTL. For a strict
-    "data is gone after N days everywhere" guarantee with N < 35, also disable PITR on
-    the table (point_in_time_recovery in service.tf). It is left enabled by default as
-    an operational safety net.
-  EOT
+  description = "Hard retention (days) for raw chat source data in S3 + DynamoDB. 0 = retain forever (default). When >0, AWS auto-expires payloads/items and caps log retention. NOTE: DynamoDB PITR retains up to 35 days independent of this."
   type        = number
   default     = 0
 
@@ -201,42 +241,4 @@ variable "source_data_retention_days" {
     condition     = var.source_data_retention_days >= 0
     error_message = "source_data_retention_days must be >= 0 (0 = retain forever)."
   }
-}
-
-# ECR ownership — normally this module owns the replicated repo (codevine/{env}/gateway)
-# that the control plane replicates into. For an INTERNAL/OWNED deployment running in
-# the SAME account as the control plane, that repo already exists and is owned by the
-# control plane's own Terraform; set manage_ecr_repo=false and pass ecr_repo_url so this
-# module creates NO ECR resources and the task def pulls the provided repo. Default true
-# = normal customer behavior (no-op).
-
-variable "manage_ecr_repo" {
-  description = "Whether this module creates+owns the gateway ECR repo (codevine/{env}/gateway) + its lifecycle/registry policies. Set false for an owned/same-account deployment where the control plane already owns that repo; then ecr_repo_url must be provided."
-  type        = bool
-  default     = true
-}
-
-variable "ecr_repo_url" {
-  description = "Externally-owned ECR repository URL the gateway task pulls from when manage_ecr_repo=false (e.g. <acct>.dkr.ecr.<region>.amazonaws.com/codevine/prod/gateway). Ignored when manage_ecr_repo=true."
-  type        = string
-  default     = ""
-}
-
-# TLS / hostname — the module creates a DNS-validated WILDCARD cert for
-# *.gateway.{domain}, valid for every {tenant}.gateway host, and matches the
-# wildcard on the listener. A pod is multi-tenant, so wildcard is the only cert
-# model. An internal/owned pod may instead REUSE an already-issued wildcard cert
-# by passing its ARN (gateway_cert_arn), in which case the module creates no cert
-# and no DNS validation record.
-
-variable "gateway_cert_arn" {
-  description = "Externally-provided ACM certificate ARN for the ALB HTTPS listener. When set, the module creates NO cert and NO DNS validation (and writes no validation record) — used by an owned pod reusing an already-issued *.gateway.{domain} wildcard. Empty (default) = the module creates+validates its own *.gateway.{domain} wildcard cert."
-  type        = string
-  default     = ""
-}
-
-variable "gateway_host_header" {
-  description = "Listener-rule host_header match. Empty (default) = the *.gateway.{domain} wildcard (multi-tenant; every {tenant}.gateway host routes here). Override only for a bespoke single-host setup."
-  type        = string
-  default     = ""
 }
