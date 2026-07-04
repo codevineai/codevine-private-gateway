@@ -115,6 +115,20 @@ variable "gateway_cert_arn" {
   default     = ""
 }
 
+# Reuse existing data stores via import (preserves chat data with no copy).
+# Set to the legacy physical names; empty = the cv-gw defaults. See imports.tf.example.
+variable "s3_payload_bucket_name" {
+  description = "Override the S3 payload bucket name to reuse an existing bucket via import. Empty = cv-gw default."
+  type        = string
+  default     = ""
+}
+
+variable "dynamodb_table_name" {
+  description = "Override the DynamoDB data table name to reuse an existing table via import. Empty = cv-gw default."
+  type        = string
+  default     = ""
+}
+
 variable "gateway_host_header" {
   description = "Override the ALB listener host_header match. Empty = the wildcard."
   type        = string

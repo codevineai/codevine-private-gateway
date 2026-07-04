@@ -86,17 +86,20 @@ Default builds its own VPC (2-AZ, single NAT). Set `vpc_id` + `public_subnet_ids
 + `private_subnet_ids` to drop the pod into an existing VPC (shared/corporate/
 backend network); all VPC/subnet/NAT/route resources are then skipped.
 
-## Migration / adoption
+## Migration — reuse the existing S3 + DynamoDB via a one-time state move
 
-2.0 is a clean baseline — pre-2.0 deployments do NOT migrate via `moved` (physical
-names changed). Options for existing data:
+Every env keeps its existing chat data by **moving the two data stores into the
+new pod's state** — no copy, no recreate. The pod's compute/ALB/IAM/SQS/secrets
+are new (cv-gw names); only the S3 payload bucket + DynamoDB table are adopted,
+at their existing physical names.
 
-- **Rebuild** (Luminary — not really live): just apply 2.0 fresh.
-- **Import** an existing resource whose physical name already matches the 2.0
-  scheme: see `imports.tf.example` (DynamoDB, S3, secrets). Plan must show
-  import + no destroy.
-- **Data copy** when the existing physical names DON'T match 2.0 (e.g.
-  rocketpartners' `codevine-prod-gw-dedicated-rocketpartners-*` S3+DynamoDB): a
-  name change forces replace, so `import` cannot preserve them in place. Stand up
-  the 2.0 pod, then copy the data over (S3 sync + DynamoDB scan/BatchWrite or an
-  export→import) before cutting tenants across. Only rocketpartners has such data.
+- The module names those two resources via `s3_payload_bucket_name` /
+  `dynamodb_table_name` (default = cv-gw scheme). Set them to the EXISTING names
+  so the adoption plans as a no-op (a rename would force replace = data loss).
+- Adopt them into this pod's state (`import`), then `terraform state rm` them from
+  the old owned-1 stack so a later owned-1 teardown doesn't destroy them. Full
+  runbook: `imports.tf.example`.
+
+This is the same one-time operation for dev, stage, prod, and Luminary. Pre-2.0
+deployments do not migrate via `moved` (other physical names changed) — but the
+data never moves; the state pointer does.

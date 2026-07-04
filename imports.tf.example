@@ -1,46 +1,40 @@
-# Import templates — adopt EXISTING stateful resources into this Terraform state
-# without destroy+recreate / data loss. Use when moving an owned pod (e.g.
-# Luminary) onto infra_version 1.8, or re-homing after the naming reset.
+# One-time data-store adoption — move the EXISTING S3 payload bucket + DynamoDB
+# data table into THIS pod's state, so the new module manages the same physical
+# resources. NO data copy, NO recreate — only the Terraform state pointer moves.
+# This is how every env (dev/stage/prod/Luminary) reuses its existing owned-1
+# chat data.
 #
-# HOW TO USE
-#   1. Copy the blocks you need into a real `imports.tf` (this .example file is
-#      ignored by Terraform).
-#   2. Fill each `id` with the existing resource's physical id/name/ARN.
-#   3. Set var.pod_name / var.environment so the module's cv-gw-{env}-{pod_name}-*
-#      names MATCH the physical names you are importing — otherwise the plan will
-#      show a rename (= replace), not a clean adoption.
-#   4. `terraform plan` — every imported resource must show "will be imported"
-#      then NO destroy (benign tag/config updates are fine).
-#   5. `terraform apply`, then DELETE the import blocks (they are one-shot).
+# The enabler: set the name-override variables so the module names these two
+# resources at their EXISTING physical names — then the import plans as a no-op
+# (a rename would force replace = data loss). Everything else keeps cv-gw naming.
 #
-# DO NOT import random_id.pod_id / random_password.* — they read back wrong and
-# plan as replace, breaking pod identity. Instead PRE-SEED the credentials secret
-# (GATEWAY_POD_ID / GATEWAY_HMAC_SECRET) before first apply so ignore_changes
-# preserves it. See docs + dedicated-gateway-tf-maintenance.md.
+# ── RUNBOOK (per env, once) ──────────────────────────────────────────────────
+#   1. In this pod's tfvars, set the overrides to the existing names, e.g. (dev):
+#        dynamodb_table_name    = "codevine-dev-gw-owned-1-data"
+#        s3_payload_bucket_name = "codevine-dev-gateway-owned-1-366290348639"
+#   2. Copy the two import blocks below into a real `imports.tf` (this .example
+#      is ignored by Terraform) with those same ids.
+#   3. `terraform plan` — both must show "will be imported" then NO destroy and
+#      NO replace (benign tag/config diffs are fine); `terraform apply`.
+#   4. Remove them from the OLD owned-1 stack's state so a later owned-1 teardown
+#      does NOT destroy them (they are now managed by this pod):
+#        terraform state rm module.gateway_pod.aws_dynamodb_table.data
+#        terraform state rm module.gateway_pod.aws_s3_bucket.payload
+#      (run against the codevine terraform/environments/codevine-<env> stack).
+#   5. Delete the import blocks (one-shot). This pod now owns the data stores.
 #
-# Note: the VPC does NOT need an import — to reuse an existing network, set the
-# vpc_id / public_subnet_ids / private_subnet_ids variables instead (BYO network).
+# Only these two persistent stores are adopted. Pod identity, secrets, SQS, ALB,
+# ECS, IAM, log group are all NEW (created fresh under cv-gw names) — the new pod
+# writes to the SAME table/bucket, so chat history is continuous.
 
-# --- DynamoDB data table (preserves all chat data) ---
+# --- DynamoDB data table (all chat data) ---
 # import {
 #   to = module.gateway.aws_dynamodb_table.data
-#   id = "cv-gw-prod-luminary-data"
+#   id = "codevine-dev-gw-owned-1-data"
 # }
 
-# --- S3 payload bucket (preserves all request/response payloads) ---
+# --- S3 payload bucket (all request/response payloads) ---
 # import {
 #   to = module.gateway.aws_s3_bucket.payload
-#   id = "cv-gw-prod-luminary-payloads-123456789012"
-# }
-
-# --- Pod credentials secret (preserves pod identity: GATEWAY_POD_ID/HMAC) ---
-# import {
-#   to = module.gateway.aws_secretsmanager_secret.pod
-#   id = "arn:aws:secretsmanager:us-east-1:123456789012:secret:cv-gw-prod-luminary-credentials-AbCdEf"
-# }
-
-# --- Registration secret ---
-# import {
-#   to = module.gateway.aws_secretsmanager_secret.registration
-#   id = "arn:aws:secretsmanager:us-east-1:123456789012:secret:cv-gw-prod-luminary-registration-AbCdEf"
+#   id = "codevine-dev-gateway-owned-1-366290348639"
 # }

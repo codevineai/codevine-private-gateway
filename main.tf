@@ -62,6 +62,9 @@ module "gateway" {
   gateway_host_header    = var.gateway_host_header
   listener_rule_priority = var.listener_rule_priority
 
+  s3_payload_bucket_name = var.s3_payload_bucket_name
+  dynamodb_table_name    = var.dynamodb_table_name
+
   gateway_image_tag          = var.gateway_image_tag
   gateway_cpu                = var.gateway_cpu
   gateway_memory             = var.gateway_memory

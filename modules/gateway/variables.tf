@@ -54,6 +54,24 @@ variable "tags" {
   default     = {}
 }
 
+# ── Data-store reuse (import existing S3 + DynamoDB in place) ─────────────────
+# Empty (default) = names follow the cv-gw scheme. Set to an EXISTING physical
+# name to reuse (import) that store in place — how a migration preserves chat
+# data with NO copy. Only the two persistent stores are overridable; everything
+# else keeps the clean cv-gw naming. See imports.tf.example.
+
+variable "s3_payload_bucket_name" {
+  description = "Override the S3 payload bucket name to reuse an existing bucket via import. Empty = cv-gw-{env}-{pod_name}-payloads-{account_id}."
+  type        = string
+  default     = ""
+}
+
+variable "dynamodb_table_name" {
+  description = "Override the DynamoDB data table name to reuse an existing table via import. Empty = cv-gw-{env}-{pod_name}-data."
+  type        = string
+  default     = ""
+}
+
 # ── Control-plane integration ────────────────────────────────────────────────
 
 variable "control_plane_account_id" {

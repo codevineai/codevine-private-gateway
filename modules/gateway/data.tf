@@ -1,6 +1,14 @@
 # Data stores — S3 payload bucket, DynamoDB table, SQS queues. All per-pod.
 
 locals {
+  # Data-store names default to the cv-gw scheme, but can be OVERRIDDEN to an
+  # existing physical name so a migration IMPORTS the existing bucket/table in
+  # place (a rename would force replace = data loss). This is how every env
+  # reuses its existing owned-1 S3 + DynamoDB instead of copying data — set the
+  # overrides to the legacy names and add the import blocks (imports.tf.example).
+  s3_bucket_name      = var.s3_payload_bucket_name != "" ? var.s3_payload_bucket_name : "${local.name}-payloads-${local.account_id}"
+  dynamodb_table_name = var.dynamodb_table_name != "" ? var.dynamodb_table_name : "${local.name}-data"
+
   pod_s3_bucket_name = aws_s3_bucket.payload.id
   pod_s3_bucket_arn  = aws_s3_bucket.payload.arn
   pod_dynamodb_name  = aws_dynamodb_table.data.name
@@ -9,7 +17,7 @@ locals {
 # ── S3 payload bucket ────────────────────────────────────────────────────────
 
 resource "aws_s3_bucket" "payload" {
-  bucket = "${local.name}-payloads-${local.account_id}"
+  bucket = local.s3_bucket_name
   tags   = merge(local.tags, { Name = "${local.name}-payloads" })
 }
 
@@ -73,7 +81,7 @@ resource "aws_s3_bucket_public_access_block" "payload" {
 # ── DynamoDB data table (shared by all tenants on this pod) ───────────────────
 
 resource "aws_dynamodb_table" "data" {
-  name                        = "${local.name}-data"
+  name                        = local.dynamodb_table_name
   billing_mode                = "PAY_PER_REQUEST"
   deletion_protection_enabled = var.enable_deletion_protection
   hash_key                    = "PK"
