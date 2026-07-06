@@ -4,14 +4,13 @@
 #   - registration_secret: bootstrap credential the gateway uses to register and
 #     to run the cert-validation callback. Generated-or-provided, frozen.
 #   - pod identity (GATEWAY_POD_ID + GATEWAY_HMAC_SECRET): the pod's live-auth
-#     identity. Generated once and frozen (ignore_changes) — the control plane
-#     treats a pod's HMAC as immutable, so identity must be stable for the pod's
+#     identity. GATEWAY_POD_ID is var.pod_name — the CodeVine-issued pod name IS
+#     the signing subject; the control plane pre-creates the gateway_pods row
+#     under this name and /register + all live-call lookups match on it. The
+#     HMAC secret is generated once and frozen (ignore_changes) — the control
+#     plane treats a pod's HMAC as immutable, so it must be stable for the pod's
 #     life. To migrate an existing pod, pre-create the credentials secret before
-#     first apply and ignore_changes preserves it (these randoms become inert).
-
-resource "random_id" "pod_id" {
-  byte_length = 8
-}
+#     first apply and ignore_changes preserves it (the random becomes inert).
 
 resource "random_password" "hmac_secret" {
   length           = 32
@@ -26,7 +25,7 @@ resource "random_password" "registration_secret" {
 }
 
 locals {
-  pod_id_value      = random_id.pod_id.hex
+  pod_id_value      = var.pod_name
   hmac_secret_value = random_password.hmac_secret.result
   pod_secret_arn    = aws_secretsmanager_secret.pod.arn
 

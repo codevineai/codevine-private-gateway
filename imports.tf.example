@@ -20,6 +20,14 @@
 #      does NOT destroy them (they are now managed by this pod):
 #        terraform state rm module.gateway_pod.aws_dynamodb_table.data
 #        terraform state rm module.gateway_pod.aws_s3_bucket.payload
+#      ALSO remove the bucket's config sub-resources — they configure the SAME
+#      physical bucket, and destroying them at retire time would suspend
+#      versioning / strip encryption / drop the public-access block on the live
+#      bucket the new pod now manages (verified on the dev migration 2026-07-06):
+#        terraform state rm 'module.gateway_pod.aws_s3_bucket_versioning.payload[0]'
+#        terraform state rm 'module.gateway_pod.aws_s3_bucket_lifecycle_configuration.payload[0]'
+#        terraform state rm 'module.gateway_pod.aws_s3_bucket_server_side_encryption_configuration.payload[0]'
+#        terraform state rm 'module.gateway_pod.aws_s3_bucket_public_access_block.payload[0]'
 #      (run against the codevine terraform/environments/codevine-<env> stack).
 #   5. Delete the import blocks (one-shot). This pod now owns the data stores.
 #
