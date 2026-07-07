@@ -1,13 +1,16 @@
-# CodeVine Dedicated Gateway — root module
+# CodeVine Gateway — root module.
 #
-# Runs entirely in YOUR (the customer's) AWS account. Provisions a
-# self-contained gateway pod: VPC, ECS cluster, ECR, ALB, ACM cert, and
-# the gateway workload (ECS service, SQS, DynamoDB, S3, IAM, autoscaling).
+# Composes two concerns:
+#   - modules/account : account-shared singletons (ECR repo + push role, audit).
+#                       Applied ONCE per account (manage_account = true, default).
+#   - modules/gateway : the per-pod gateway. Fully name-isolated by pod_name, so
+#                       any number run in one account.
 #
-# DNS for {customer}.gateway.codevine.ai is managed by CodeVine. After
-# apply, send the `domain_validation_options` output to CodeVine so they
-# can validate the TLS certificate and point the gateway hostname at your
-# ALB. See README.md.
+# First pod in an account: manage_account = true (creates the account bootstrap
+# and consumes its outputs). Additional pods in the SAME account: set
+# manage_account = false and pass ecr_repo_url + ecr_push_role_arn from the first
+# deployment's outputs. DNS + per-tenant hostnames are handled by the control
+# plane; cert validation is automatic via the in-apply callback. See README.
 
 provider "aws" {
   region  = var.aws_region
@@ -15,21 +18,52 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project   = "codevine"
+      Project   = var.project_name
       ManagedBy = "Terraform"
-      Component = "dedicated-gateway"
-      Customer  = var.customer
     }
   }
+}
+
+module "account" {
+  count  = var.manage_account ? 1 : 0
+  source = "./modules/account"
+
+  project_name             = var.project_name
+  environment              = var.environment
+  control_plane_account_id = var.control_plane_account_id
+  manage_registry          = var.manage_registry
+
+  enable_cloudtrail         = var.enable_cloudtrail
+  enable_guardduty          = var.enable_guardduty
+  cloudtrail_retention_days = var.cloudtrail_retention_days
+}
+
+locals {
+  ecr_repo_url      = var.manage_account ? module.account[0].ecr_repo_url : var.ecr_repo_url
+  ecr_push_role_arn = var.manage_account ? module.account[0].ecr_push_role_arn : var.ecr_push_role_arn
 }
 
 module "gateway" {
   source = "./modules/gateway"
 
+  pod_name                 = var.pod_name
   customer                 = var.customer
+  project_name             = var.project_name
+  environment              = var.environment
+  domain_name              = var.domain_name
   control_plane_account_id = var.control_plane_account_id
   control_plane_url        = var.control_plane_url
   registration_secret      = var.registration_secret
+
+  ecr_repo_url      = local.ecr_repo_url
+  ecr_push_role_arn = local.ecr_push_role_arn
+
+  gateway_cert_arn       = var.gateway_cert_arn
+  gateway_host_header    = var.gateway_host_header
+  listener_rule_priority = var.listener_rule_priority
+
+  s3_payload_bucket_name = var.s3_payload_bucket_name
+  dynamodb_table_name    = var.dynamodb_table_name
 
   gateway_image_tag          = var.gateway_image_tag
   gateway_cpu                = var.gateway_cpu
@@ -44,21 +78,11 @@ module "gateway" {
   infra_version              = var.infra_version
   source_data_retention_days = var.source_data_retention_days
 
+  vpc_id               = var.vpc_id
+  public_subnet_ids    = var.public_subnet_ids
+  private_subnet_ids   = var.private_subnet_ids
   vpc_cidr             = var.vpc_cidr
   availability_zones   = var.availability_zones
   public_subnet_cidrs  = var.public_subnet_cidrs
   private_subnet_cidrs = var.private_subnet_cidrs
-}
-
-# Account-level audit logging + threat detection. Defaults ON so the account
-# retains CloudTrail + GuardDuty after it leaves the CodeVine AWS Organization
-# (org-level coverage stops on removal). See modules/audit and README.
-module "audit" {
-  source = "./modules/audit"
-
-  customer = var.customer
-
-  enable_cloudtrail         = var.enable_cloudtrail
-  enable_guardduty          = var.enable_guardduty
-  cloudtrail_retention_days = var.cloudtrail_retention_days
 }

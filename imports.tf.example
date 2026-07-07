@@ -1,0 +1,48 @@
+# One-time data-store adoption — move the EXISTING S3 payload bucket + DynamoDB
+# data table into THIS pod's state, so the new module manages the same physical
+# resources. NO data copy, NO recreate — only the Terraform state pointer moves.
+# This is how every env (dev/stage/prod/Luminary) reuses its existing owned-1
+# chat data.
+#
+# The enabler: set the name-override variables so the module names these two
+# resources at their EXISTING physical names — then the import plans as a no-op
+# (a rename would force replace = data loss). Everything else keeps cv-gw naming.
+#
+# ── RUNBOOK (per env, once) ──────────────────────────────────────────────────
+#   1. In this pod's tfvars, set the overrides to the existing names, e.g. (dev):
+#        dynamodb_table_name    = "codevine-dev-gw-owned-1-data"
+#        s3_payload_bucket_name = "codevine-dev-gateway-owned-1-366290348639"
+#   2. Copy the two import blocks below into a real `imports.tf` (this .example
+#      is ignored by Terraform) with those same ids.
+#   3. `terraform plan` — both must show "will be imported" then NO destroy and
+#      NO replace (benign tag/config diffs are fine); `terraform apply`.
+#   4. Remove them from the OLD owned-1 stack's state so a later owned-1 teardown
+#      does NOT destroy them (they are now managed by this pod):
+#        terraform state rm module.gateway_pod.aws_dynamodb_table.data
+#        terraform state rm module.gateway_pod.aws_s3_bucket.payload
+#      ALSO remove the bucket's config sub-resources — they configure the SAME
+#      physical bucket, and destroying them at retire time would suspend
+#      versioning / strip encryption / drop the public-access block on the live
+#      bucket the new pod now manages (verified on the dev migration 2026-07-06):
+#        terraform state rm 'module.gateway_pod.aws_s3_bucket_versioning.payload[0]'
+#        terraform state rm 'module.gateway_pod.aws_s3_bucket_lifecycle_configuration.payload[0]'
+#        terraform state rm 'module.gateway_pod.aws_s3_bucket_server_side_encryption_configuration.payload[0]'
+#        terraform state rm 'module.gateway_pod.aws_s3_bucket_public_access_block.payload[0]'
+#      (run against the codevine terraform/environments/codevine-<env> stack).
+#   5. Delete the import blocks (one-shot). This pod now owns the data stores.
+#
+# Only these two persistent stores are adopted. Pod identity, secrets, SQS, ALB,
+# ECS, IAM, log group are all NEW (created fresh under cv-gw names) — the new pod
+# writes to the SAME table/bucket, so chat history is continuous.
+
+# --- DynamoDB data table (all chat data) ---
+# import {
+#   to = module.gateway.aws_dynamodb_table.data
+#   id = "codevine-dev-gw-owned-1-data"
+# }
+
+# --- S3 payload bucket (all request/response payloads) ---
+# import {
+#   to = module.gateway.aws_s3_bucket.payload
+#   id = "codevine-dev-gateway-owned-1-366290348639"
+# }

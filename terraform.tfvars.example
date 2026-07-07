@@ -6,9 +6,10 @@ aws_region  = "us-east-1"
 aws_profile = "my-codevine-gateway-admin" # an AWS CLI profile with admin in your account
 
 # --- Assigned by CodeVine ---
-customer                 = "acme"              # your assigned identifier
+pod_name                 = "acme-1"            # unique per-pod name (2-15 chars); the SOLE token in every resource name
 control_plane_account_id = "996904209118"      # CodeVine control plane account
 control_plane_url        = "https://id.codevine.ai"
+# customer = "acme"                            # OPTIONAL — tag/billing label only, never in a resource name
 
 # registration_secret is sensitive — prefer the environment variable:
 #   export TF_VAR_registration_secret='...'
@@ -30,11 +31,31 @@ control_plane_url        = "https://id.codevine.ai"
 # enable_waf     = false
 # waf_count_mode = true
 
+# --- Coexisting in one AWS account (three cases) ---
+#
+# (a) A SECOND pod in the SAME env + account (another prod pod for one customer):
+#     it owns none of the account bootstrap; point it at the first deployment.
+# manage_account    = false
+# ecr_repo_url      = "996904209118.dkr.ecr.us-east-1.amazonaws.com/codevine/prod/gateway"
+# ecr_push_role_arn = "arn:aws:iam::996904209118:role/codevine-gateway-ecr-push"
+#
+# (b) A SECOND ENVIRONMENT sharing one account (e.g. stage in dev's account
+#     366290348639). It needs its OWN per-env ECR repo (codevine/stage/gateway)
+#     but must NOT recreate the account singletons (registry policy, push role,
+#     GuardDuty detector, trail) that the first env already made:
+# manage_account    = true    # still run the account module (creates the stage repo)
+# manage_registry   = false   # reuse dev's registry policy + push role
+# enable_cloudtrail = false   # dev's trail already covers the account
+# enable_guardduty  = false   # one detector per account+region
+#
+# (c) The FIRST env in a fresh account: leave all the above at their defaults
+#     (manage_account = true, manage_registry = true, enable_* = true).
+
 # --- Optional hard data retention ---
 # Auto-expire raw chat source data (S3 payloads + DynamoDB items) after N days.
 # 0 (default) = retain forever. When set, AWS enforces deletion: S3 objects and
 # their noncurrent versions expire, DynamoDB items expire via TTL (active sessions
 # slide forward so they don't vanish mid-use), and log retention is capped to match.
 # NOTE: DynamoDB PITR keeps up to 35 days of backups independent of this; disable
-# PITR (modules/gateway/service.tf) for a strict guarantee under 35 days.
+# PITR (modules/gateway/data.tf) for a strict guarantee under 35 days.
 # source_data_retention_days = 90
