@@ -129,6 +129,29 @@ resource "aws_iam_role_policy" "gateway_bedrock_assume" {
   })
 }
 
+# Bedrock invoke in the pod's own account. Unconditional: when a tenant has no
+# AWS account registered with the control plane, analytics requests fall back
+# to invoking Bedrock here with the task role. Requires Anthropic model access
+# to be enabled in this account/region (an AWS console step; IAM alone is not
+# sufficient).
+resource "aws_iam_role_policy" "gateway_bedrock_invoke" {
+  name = "${local.name}-bedrock-invoke"
+  role = aws_iam_role.gateway_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+      Resource = [
+        "arn:${local.partition}:bedrock:*::foundation-model/*",
+        "arn:${local.partition}:bedrock:*:${local.account_id}:inference-profile/*",
+        "arn:${local.partition}:bedrock:*:${local.account_id}:application-inference-profile/*",
+      ]
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "gateway_secrets_read" {
   name = "${local.name}-secrets-read"
   role = aws_iam_role.gateway_task.id

@@ -252,9 +252,9 @@ variable "cert_validation_timeout" {
 }
 
 variable "infra_version" {
-  description = "CodeVine-controlled infra version stamp. 2.0: clean-baseline rewrite (account/pod split, cv-gw naming, BYO network, http cert callback)."
+  description = "CodeVine-controlled infra version stamp. 2.1: task-role Bedrock invoke in the pod account (pod-local analytics fallback). 2.0: clean-baseline rewrite (account/pod split, cv-gw naming, BYO network, http cert callback)."
   type        = string
-  default     = "2.0"
+  default     = "2.1"
 }
 
 variable "source_data_retention_days" {
