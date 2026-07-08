@@ -25,6 +25,11 @@ principal for the cross-account roles), and a registration secret.
 - Terraform >= 1.5
 - An AWS CLI profile with admin in the account you're deploying into
 - An S3 bucket + DynamoDB table **in your account** for Terraform remote state
+- **Anthropic model access enabled in Amazon Bedrock** in this account and
+  region (AWS console → Bedrock → Model access). The gateway runs CodeVine's
+  session-analytics LLM requests against Bedrock in your account; the IAM
+  permissions are provisioned by this Terraform, but model access is a
+  one-time console step AWS requires per account.
 - The following values from CodeVine onboarding:
   - `customer` (your assigned identifier, e.g. `acme`)
   - `control_plane_account_id`

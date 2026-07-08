@@ -30,13 +30,20 @@ resource "aws_acm_certificate" "gateway" {
 # server-side (UPSERT), so re-applies are harmless. Pure HCL via the http provider
 # — no shell/curl host dependency. Deferred to apply on first create (the record
 # is unknown until the cert exists). The postcondition fails the apply on non-2xx.
+#
+# Gated on var.registration_secret: the callback fires ONLY when the operator
+# supplies the secret (first apply / deliberate re-validation). A data source
+# re-executes on EVERY plan, and steady-state plans of a live pod must not
+# depend on the bootstrap secret or the control plane — the validation CNAME is
+# durable (kept for the pod's life for ACM auto-renewal), so once the cert is
+# ISSUED there is nothing to submit.
 data "http" "cert_validation_callback" {
-  count  = local.manage_cert ? 1 : 0
+  count  = local.manage_cert && var.registration_secret != "" ? 1 : 0
   url    = "${trimsuffix(var.control_plane_url, "/")}/api/internal/gateway/pods/cert-validation"
   method = "POST"
 
   request_headers = {
-    Authorization = "Bearer ${local.effective_registration_secret}"
+    Authorization = "Bearer ${var.registration_secret}"
     Content-Type  = "application/json"
   }
 
@@ -52,13 +59,6 @@ data "http" "cert_validation_callback" {
   })
 
   lifecycle {
-    # The callback is Bearer-authed by the registration secret the CONTROL PLANE
-    # already minted (issue-first). A self-generated secret it has never seen would
-    # 401 — so creating+validating a cert requires the provided secret.
-    precondition {
-      condition     = var.registration_secret != ""
-      error_message = "Creating + validating a cert requires the CodeVine-minted registration_secret (issue-first onboarding). Provide var.registration_secret, or supply a pre-issued cert via var.gateway_cert_arn to skip the callback."
-    }
     postcondition {
       condition     = contains([200, 201, 204], self.status_code)
       error_message = "cert-validation callback failed: HTTP ${self.status_code} from the control plane."
@@ -77,5 +77,16 @@ resource "aws_acm_certificate_validation" "gateway" {
 
   timeouts {
     create = var.cert_validation_timeout
+  }
+
+  lifecycle {
+    # Fail fast (instead of polling to timeout) when a NOT-yet-issued cert has
+    # no way to get its validation record: the callback above was skipped
+    # because no registration_secret was supplied. Evaluated at apply, after
+    # the cert exists — an already-ISSUED cert passes without the secret.
+    precondition {
+      condition     = var.registration_secret != "" || aws_acm_certificate.gateway[0].status == "ISSUED"
+      error_message = "Cert is not ISSUED and no registration_secret was provided, so the validation record cannot be submitted to the control plane. Re-run with TF_VAR_registration_secret set (CodeVine-minted, issue-first onboarding), or supply a pre-issued cert via var.gateway_cert_arn."
+    }
   }
 }
